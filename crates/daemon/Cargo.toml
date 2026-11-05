@@ -1,0 +1,20 @@
+[package]
+name = "daemon"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "dtshimd"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+
+
+dtshim-core.workspace = true
+tempfile = "3"
+futures = "0.3.34"
