@@ -1,0 +1,16 @@
+[package]
+name = "client"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "dtshim"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+dtshim-core.workspace = true
+futures = "0.3.34"
