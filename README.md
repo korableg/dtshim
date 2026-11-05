@@ -68,8 +68,7 @@ DTSHIM_TRANSPORT=tcp DTSHIM_TCP_ADDR=host.docker.internal:20001 git --version
 
 ### 1. Установить и запустить демон
 
-Скачайте архив для своей платформы из **Actions → Test and publish builds →
-успешный запуск → Artifacts** этого репозитория.
+Скачайте архив для своей платформы из [Releases](https://github.com/korableg/dtshim/releases).
 
 | Платформа хоста     | Архив                                      |
 | ------------------- | ------------------------------------------ |
