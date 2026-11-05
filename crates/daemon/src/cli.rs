@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
+use dtshim_core::{env, socket::Transport};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -10,11 +11,14 @@ use clap::Parser;
     about = "Host daemon for executing commands from Docker containers"
 )]
 pub(crate) struct Cli {
+    #[arg(long, env = env::TRANSPORT, default_value = "tcp")]
+    pub(crate) transport: Transport,
+
     #[arg(
         long,
-        env = "DTSHIM_SOCKET_PATH",
+        env = env::SOCKET_PATH,
         value_name = "PATH",
-        help = "Unix socket path (defaults to a socket in a temporary directory)"
+        help = "Unix socket path; requires unix transport (defaults to a temporary directory)"
     )]
     pub(crate) socket: Option<PathBuf>,
 }

@@ -1,10 +1,12 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use anyhow::{Context, Result, anyhow, ensure};
+use anyhow::{Context, Result, anyhow};
 use dtshim_core::model::Start;
 
+use crate::socket::SocketConnector;
+
 pub(crate) struct Request {
-    pub(crate) socket: PathBuf,
+    pub(crate) socket: Box<dyn SocketConnector>,
     pub(crate) start: Start,
 }
 
@@ -30,12 +32,7 @@ fn command_line() -> Result<(String, Vec<String>)> {
 }
 
 impl Request {
-    pub(crate) fn new() -> Result<Self> {
-        let socket =
-            std::env::var_os("DTSHIM_SOCKET_PATH").context("DTSHIM_SOCKET_PATH must be set")?;
-        ensure!(!socket.is_empty(), "DTSHIM_SOCKET_PATH must not be empty");
-        let socket = PathBuf::from(socket);
-
+    pub(crate) fn new(socket: Box<dyn SocketConnector>) -> Result<Self> {
         let (command, args) = command_line()?;
         let start = Start {
             command,
