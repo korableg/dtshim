@@ -3,21 +3,16 @@ use std::{io::ErrorKind, process::ExitCode};
 use anyhow::{Context, Result, bail, ensure};
 use dtshim_core::{codec::PostcardCodec, model::Message};
 use futures::{SinkExt, StreamExt};
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::UnixStream,
-};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::codec::{FramedRead, FramedWrite};
 
 use crate::request::Request;
 
 pub(crate) async fn run(request: Request) -> Result<ExitCode> {
     let Request { socket, start } = request;
-    let stream = UnixStream::connect(&socket)
-        .await
-        .with_context(|| format!("failed to connect to socket {}", socket.display()))?;
+    let stream = socket.connect().await?;
 
-    let (rd, wr) = stream.into_split();
+    let (rd, wr) = tokio::io::split(stream);
     let mut rx = FramedRead::new(rd, PostcardCodec::new());
     let mut tx = FramedWrite::new(wr, PostcardCodec::new());
 

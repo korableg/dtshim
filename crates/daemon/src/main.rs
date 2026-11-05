@@ -6,12 +6,11 @@ mod socket;
 
 use std::process::ExitCode;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Parser;
 
 use crate::cli::Cli;
 use crate::signal::Shutdown;
-use crate::socket::BoundSocket;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<ExitCode> {
@@ -29,12 +28,12 @@ async fn main() -> Result<ExitCode> {
 }
 
 async fn run(cli: Cli) -> Result<()> {
-    let socket = BoundSocket::bind(cli.socket)?;
+    let socket = socket::bind(cli.transport, cli.socket).await?;
     let mut shutdown = Shutdown::new()?;
 
-    println!("{}", socket.path().to_str().context("invalid socket path")?);
+    println!("{}", socket.address()?);
 
-    server::run(socket.listener(), shutdown.wait()).await;
+    server::run(socket.as_ref(), shutdown.wait()).await;
 
     Ok(())
 }
