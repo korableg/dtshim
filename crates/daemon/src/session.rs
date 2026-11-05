@@ -1,11 +1,10 @@
 use std::{os::unix::process::ExitStatusExt, process::Stdio};
 
 use anyhow::{Context, Result, bail, ensure};
-use dtshim_core::{codec::PostcardCodec, model::Message};
+use dtshim_core::{codec::PostcardCodec, model::Message, socket::Connection};
 use futures::{SinkExt, StreamExt};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::UnixStream,
     process::Child,
 };
 use tokio_util::{
@@ -13,12 +12,12 @@ use tokio_util::{
     sync::CancellationToken,
 };
 
-pub(crate) async fn run(stream: UnixStream, cancellation: CancellationToken) -> Result<()> {
+pub(crate) async fn run(stream: Box<dyn Connection>, cancellation: CancellationToken) -> Result<()> {
     let mut child: Option<Child> = None;
 
     let result = {
         let connection = async {
-            let (rd, wr) = stream.into_split();
+            let (rd, wr) = tokio::io::split(stream);
             let mut rx = FramedRead::new(rd, PostcardCodec::new());
             let mut tx = FramedWrite::new(wr, PostcardCodec::new());
 
