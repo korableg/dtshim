@@ -1,0 +1,10 @@
+[package]
+name = "dtshim-core"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_bytes = "0.11.19"
+tokio-util.workspace = true
+postcard.workspace = true
