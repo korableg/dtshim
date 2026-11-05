@@ -19,7 +19,7 @@
 
 Пакет состоит из двух программ:
 
-- `dtshimd` — демон на хосте. Принимает запросы через Unix-сокет и запускает процессы.
+- `dtshimd` — демон на хосте. Принимает запросы через TCP или Unix-сокет и запускает процессы.
 - `dtshim` — клиент внутри контейнера. Передаёт имя команды, аргументы, переменные
   окружения и стандартный ввод демону, а затем возвращает вывод и код завершения.
 
@@ -30,7 +30,36 @@ ln -s /usr/local/bin/dtshim /usr/bin/git
 ```
 
 Вызов `git --version` через эту ссылку запускает `git --version` на хосте.
-Форма `dtshim git --version` для выбора команды не используется.
+
+Транспорт выбирается аргументом `--transport tcp|unix` или переменной окружения `DTSHIM_TRANSPORT=tcp|unix`.
+По умолчанию TCP и демон слушает `127.0.0.1:{20001-65535}`.
+При запуске демон в stdout выводит tcp адрес или путь до unix сокета.
+В режиме Unix без `--socket` и `DTSHIM_SOCKET_PATH` демон создаст сокет во временном каталоге.
+
+**Сервер (`dtshimd`)**
+
+| Настройка                    | Аргумент                 | Переменная окружения |
+| ---------------------------- | ------------------------ | -------------------- |
+| Транспорт (`tcp` или `unix`) | `--transport <tcp/unix>` | `DTSHIM_TRANSPORT`   |
+| Путь Unix-сокета             | `--socket <PATH>`        | `DTSHIM_SOCKET_PATH` |
+
+**Клиент (`dtshim`)**
+
+Клиент тоже использует TCP по умолчанию. Его настройки задаются только
+переменными окружения:
+
+| Настройка                    | Аргумент | Переменная окружения |
+| ---------------------------- | -------- | -------------------- |
+| Транспорт (`tcp` или `unix`) | —        | `DTSHIM_TRANSPORT`   |
+| TCP-адрес (`HOST:PORT`)      | —        | `DTSHIM_TCP_ADDR`    |
+| Путь Unix-сокета             | —        | `DTSHIM_SOCKET_PATH` |
+
+Клиенту необходимо передать адрес или путь до сокета через env.
+
+```sh
+DTSHIM_TRANSPORT=unix DTSHIM_SOCKET_PATH=/run/dtshim/socket git --version
+DTSHIM_TRANSPORT=tcp DTSHIM_TCP_ADDR=host.docker.internal:20001 git --version
+```
 
 ## Пример использования на Linux
 
@@ -58,11 +87,8 @@ install -m 755 dtshimd "$HOME/.local/bin/dtshimd"
 
 mkdir -p "$HOME/.cache/dtshim"
 chmod 700 "$HOME/.cache/dtshim"
-"$HOME/.local/bin/dtshimd" --socket "$HOME/.cache/dtshim/socket"
+"$HOME/.local/bin/dtshimd" --transport unix --socket "$HOME/.cache/dtshim/socket"
 ```
-
-Оставьте демон работающим в этом терминале. Он напечатает путь к сокету.
-Если не указать `--socket`, демон создаст сокет во временном каталоге.
 
 ### 2. Добавить клиент в Docker-образ
 
@@ -79,19 +105,11 @@ RUN mkdir -p /opt/host-bin \
 ENV PATH="/opt/host-bin:${PATH}"
 ```
 
-Каталог `/opt/host-bin` находится в начале `PATH`, поэтому вызовы `git` идут
-через клиент. Для других команд добавьте аналогичные ссылки.
-
-В другом терминале соберите образ:
-
 ```sh
 docker build -t dtshim-example .
 ```
 
-Образ `ghcr.io/korableg/dtshim` содержит только статический Linux-клиент
-для `linux/amd64` и `linux/arm64`. Docker выбирает подходящую архитектуру.
-Для воспроизводимой сборки замените `latest` на опубликованный тег, например
-`v0.1.0`, или digest образа.
+Образ `ghcr.io/korableg/dtshim` содержит только статический Linux-клиент для `linux/amd64` и `linux/arm64`.
 
 ### 3. Подключить контейнер к демону
 
@@ -101,14 +119,31 @@ docker build -t dtshim-example .
 docker run --rm \
   --user "$(id -u):$(id -g)" \
   --mount "type=bind,src=$HOME/.cache/dtshim,dst=/run/dtshim" \
+  --env DTSHIM_TRANSPORT=unix \
   --env DTSHIM_SOCKET_PATH=/run/dtshim/socket \
   dtshim-example git --version
 ```
 
 Команда выведет версию Git, установленного на хосте. Контейнер запускается
 с UID/GID пользователя демона, чтобы иметь доступ к сокету в закрытом каталоге.
-`DTSHIM_SOCKET_PATH` обязателен для клиента.
+`DTSHIM_SOCKET_PATH` обязателен для клиента в режиме Unix.
 
-Стандартные потоки передаются между контейнером и процессом на хосте;
-для передачи stdin через `docker run` добавьте флаг `-i`. Код завершения
-команды возвращается вызывающему процессу в контейнере.
+Для подключения по TCP на Linux запустите демон без аргументов:
+
+```sh
+"$HOME/.local/bin/dtshimd"
+```
+
+Адрес из stdout нужно передать как env `DTSHIM_TCP_ADDR`.
+
+```sh
+printf 'Адрес демона: '
+read -r DTSHIM_TCP_ADDR
+docker run --rm --network host \
+  --env DTSHIM_TRANSPORT=tcp \
+  --env DTSHIM_TCP_ADDR="$DTSHIM_TCP_ADDR" \
+  dtshim-example git --version
+```
+
+Этот TCP-пример рассчитан на Docker Engine на Linux: сеть хоста позволяет
+контейнеру подключиться к `127.0.0.1` демона.

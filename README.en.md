@@ -20,7 +20,7 @@ in the container image.
 
 The package consists of two programs:
 
-- `dtshimd` — the host daemon. Accepts requests through a Unix socket and starts processes.
+- `dtshimd` — the host daemon. Accepts requests through TCP or a Unix socket and starts processes.
 - `dtshim` — the client inside the container. Sends the command name, arguments,
   environment variables, and standard input to the daemon, then returns the output
   and exit code.
@@ -32,7 +32,37 @@ ln -s /usr/local/bin/dtshim /usr/bin/git
 ```
 
 Calling `git --version` through this link runs `git --version` on the host.
-The syntax `dtshim git --version` is not used to select the command.
+
+Select the transport with `--transport tcp|unix` or the
+`DTSHIM_TRANSPORT=tcp|unix` environment variable.
+TCP is the default, and the daemon listens on `127.0.0.1:{20001-65535}`.
+At startup, the daemon writes the TCP address or Unix socket path to stdout.
+In Unix mode, if both `--socket` and `DTSHIM_SOCKET_PATH` are omitted, the daemon
+creates a socket in a temporary directory.
+
+**Server (`dtshimd`)**
+
+| Setting | Argument | Environment variable |
+| --- | --- | --- |
+| Transport (`tcp` or `unix`) | `--transport <tcp/unix>` | `DTSHIM_TRANSPORT` |
+| Unix socket path | `--socket <PATH>` | `DTSHIM_SOCKET_PATH` |
+
+**Client (`dtshim`)**
+
+The client also defaults to TCP. Configure it only through environment variables:
+
+| Setting | Argument | Environment variable |
+| --- | --- | --- |
+| Transport (`tcp` or `unix`) | — | `DTSHIM_TRANSPORT` |
+| TCP address (`HOST:PORT`) | — | `DTSHIM_TCP_ADDR` |
+| Unix socket path | — | `DTSHIM_SOCKET_PATH` |
+
+The client requires the address or socket path to be passed through environment variables.
+
+```sh
+DTSHIM_TRANSPORT=unix DTSHIM_SOCKET_PATH=/run/dtshim/socket git --version
+DTSHIM_TRANSPORT=tcp DTSHIM_TCP_ADDR=host.docker.internal:20001 git --version
+```
 
 ## Usage example on Linux
 
@@ -59,11 +89,8 @@ install -m 755 dtshimd "$HOME/.local/bin/dtshimd"
 
 mkdir -p "$HOME/.cache/dtshim"
 chmod 700 "$HOME/.cache/dtshim"
-"$HOME/.local/bin/dtshimd" --socket "$HOME/.cache/dtshim/socket"
+"$HOME/.local/bin/dtshimd" --transport unix --socket "$HOME/.cache/dtshim/socket"
 ```
-
-Leave the daemon running in this terminal. It prints the socket path.
-If `--socket` is omitted, the daemon creates a socket in a temporary directory.
 
 ### 2. Add the client to your Docker image
 
@@ -80,19 +107,12 @@ RUN mkdir -p /opt/host-bin \
 ENV PATH="/opt/host-bin:${PATH}"
 ```
 
-The `/opt/host-bin` directory comes first in `PATH`, so calls to `git` go through
-the client. Add similar links for other commands.
-
-Build the image in another terminal:
-
 ```sh
 docker build -t dtshim-example .
 ```
 
 The `ghcr.io/korableg/dtshim` image contains only the statically linked Linux client
-for `linux/amd64` and `linux/arm64`. Docker selects the appropriate architecture.
-For reproducible builds, replace `latest` with a published tag, such as `v0.1.0`,
-or an image digest.
+for `linux/amd64` and `linux/arm64`.
 
 ### 3. Connect the container to the daemon
 
@@ -102,14 +122,31 @@ Mount the socket directory and specify the socket path inside the container:
 docker run --rm \
   --user "$(id -u):$(id -g)" \
   --mount "type=bind,src=$HOME/.cache/dtshim,dst=/run/dtshim" \
+  --env DTSHIM_TRANSPORT=unix \
   --env DTSHIM_SOCKET_PATH=/run/dtshim/socket \
   dtshim-example git --version
 ```
 
 The command prints the version of Git installed on the host. The container runs
 with the daemon user's UID/GID so it can access the socket in the private directory.
-`DTSHIM_SOCKET_PATH` is required by the client.
+`DTSHIM_SOCKET_PATH` is required by the client in Unix mode.
 
-Standard streams are forwarded between the container and the host process.
-To pass stdin through `docker run`, add the `-i` flag. The command's exit code
-is returned to the calling process inside the container.
+To connect over TCP on Linux, start the daemon without arguments:
+
+```sh
+"$HOME/.local/bin/dtshimd"
+```
+
+Pass the address printed to stdout through the `DTSHIM_TCP_ADDR` environment variable.
+
+```sh
+printf 'Daemon address: '
+read -r DTSHIM_TCP_ADDR
+docker run --rm --network host \
+  --env DTSHIM_TRANSPORT=tcp \
+  --env DTSHIM_TCP_ADDR="$DTSHIM_TCP_ADDR" \
+  dtshim-example git --version
+```
+
+This TCP example targets Docker Engine on Linux: host networking lets the
+container connect to the daemon's `127.0.0.1` address.
