@@ -71,8 +71,7 @@ which already has Git installed.
 
 ### 1. Install and start the daemon
 
-Download the archive for your platform from **Actions → Test and publish builds →
-a successful run → Artifacts** in this repository.
+Download the archive for your platform from [Releases](https://github.com/korableg/dtshim/releases).
 
 | Host platform | Archive |
 | --- | --- |
