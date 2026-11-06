@@ -18,6 +18,7 @@ pub(crate) async fn run(
     stream: Box<dyn Connection>,
     cancellation: CancellationToken,
     volumes: Arc<Volumes>,
+    host_env: Arc<Vec<String>>,
 ) -> Result<()> {
     let mut child: Option<Child> = None;
 
@@ -35,6 +36,7 @@ pub(crate) async fn run(
                         for arg in &mut start.args {
                             *arg = volumes.map_to_host(arg);
                         }
+                        start.env.retain(|(name, _)| !host_env.contains(name));
                         for (_, value) in &mut start.env {
                             *value = volumes.map_to_host(value);
                         }

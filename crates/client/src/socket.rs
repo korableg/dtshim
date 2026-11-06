@@ -49,12 +49,9 @@ pub(crate) fn connector(
 ) -> Result<Box<dyn SocketConnector>> {
     match transport {
         Transport::Tcp => {
-            ensure!(
-                path.is_none(),
-                "{SOCKET_PATH} requires {TRANSPORT}=unix"
-            );
-            let address = tcp_addr
-                .with_context(|| format!("{TCP_ADDR} must be set for TCP transport"))?;
+            ensure!(path.is_none(), "{SOCKET_PATH} requires {TRANSPORT}=unix");
+            let address =
+                tcp_addr.with_context(|| format!("{TCP_ADDR} must be set for TCP transport"))?;
             let (host, port) = address
                 .rsplit_once(':')
                 .with_context(|| format!("{TCP_ADDR} must be HOST:PORT"))?;
@@ -72,12 +69,9 @@ pub(crate) fn connector(
             Ok(Box::new(TcpSocket { address }))
         }
         Transport::Unix => {
-            ensure!(
-                tcp_addr.is_none(),
-                "{TCP_ADDR} requires {TRANSPORT}=tcp"
-            );
-            let path = path
-                .with_context(|| format!("{SOCKET_PATH} must be set for Unix transport"))?;
+            ensure!(tcp_addr.is_none(), "{TCP_ADDR} requires {TRANSPORT}=tcp");
+            let path =
+                path.with_context(|| format!("{SOCKET_PATH} must be set for Unix transport"))?;
             ensure!(
                 !path.as_os_str().is_empty(),
                 "Unix socket path must not be empty"
