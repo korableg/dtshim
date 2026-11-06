@@ -34,10 +34,17 @@ fn command_line() -> Result<(String, Vec<String>)> {
 impl Request {
     pub(crate) fn new(socket: Box<dyn SocketConnector>) -> Result<Self> {
         let (command, args) = command_line()?;
+        let cwd = std::env::current_dir().context("failed to get current working directory")?;
+        let cwd = std::path::absolute(cwd)
+            .context("failed to resolve absolute working directory")?;
         let start = Start {
             command,
             args,
             env: std::env::vars().collect(),
+            cwd: cwd
+                .to_str()
+                .context("working directory is not valid UTF-8")?
+                .to_string(),
         };
 
         Ok(Self { socket, start })

@@ -42,20 +42,23 @@ creates a socket in a temporary directory.
 
 **Server (`dtshimd`)**
 
-| Setting | Argument | Environment variable |
-| --- | --- | --- |
-| Transport (`tcp` or `unix`) | `--transport <tcp/unix>` | `DTSHIM_TRANSPORT` |
-| Unix socket path | `--socket <PATH>` | `DTSHIM_SOCKET_PATH` |
+| Setting                      | Argument                         | Environment variable    |
+| ---------------------------- | -------------------------------- | ----------------------- |
+| Transport (`tcp` or `unix`)  | `--transport <tcp/unix>`         | `DTSHIM_TRANSPORT`      |
+| Unix socket path             | `--socket <PATH>`                | `DTSHIM_SOCKET_PATH`    |
+| Host/container path mappings | `--volume_mapping <HOST:DOCKER>` | `DTSHIM_VOLUME_MAPPING` |
+
+Volume mapping replaces paths in `cwd`, `args`, `env`, `stdin`, `stdout`, and `stderr`.
 
 **Client (`dtshim`)**
 
 The client also defaults to TCP. Configure it only through environment variables:
 
-| Setting | Argument | Environment variable |
-| --- | --- | --- |
-| Transport (`tcp` or `unix`) | — | `DTSHIM_TRANSPORT` |
-| TCP address (`HOST:PORT`) | — | `DTSHIM_TCP_ADDR` |
-| Unix socket path | — | `DTSHIM_SOCKET_PATH` |
+| Setting                     | Argument | Environment variable |
+| --------------------------- | -------- | -------------------- |
+| Transport (`tcp` or `unix`) | —        | `DTSHIM_TRANSPORT`   |
+| TCP address (`HOST:PORT`)   | —        | `DTSHIM_TCP_ADDR`    |
+| Unix socket path            | —        | `DTSHIM_SOCKET_PATH` |
 
 The client requires the address or socket path to be passed through environment variables.
 
@@ -73,11 +76,11 @@ which already has Git installed.
 
 Download the archive for your platform from [Releases](https://github.com/korableg/dtshim/releases).
 
-| Host platform | Archive |
-| --- | --- |
-| Linux x86_64 | `dtshim-x86_64-unknown-linux-musl.tar.gz` |
-| Linux ARM64 | `dtshim-aarch64-unknown-linux-musl.tar.gz` |
-| macOS Apple Silicon | `dtshim-aarch64-apple-darwin.tar.gz` |
+| Host platform       | Archive                                    |
+| ------------------- | ------------------------------------------ |
+| Linux x86_64        | `dtshim-x86_64-unknown-linux-musl.tar.gz`  |
+| Linux ARM64         | `dtshim-aarch64-unknown-linux-musl.tar.gz` |
+| macOS Apple Silicon | `dtshim-aarch64-apple-darwin.tar.gz`       |
 
 Each archive contains `dtshim` and `dtshimd`. To install the daemon on Linux x86_64:
 

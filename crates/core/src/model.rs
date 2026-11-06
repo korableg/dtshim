@@ -5,6 +5,7 @@ pub struct Start {
     pub command: String,
     pub args: Vec<String>,
     pub env: Vec<(String, String)>,
+    pub cwd: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

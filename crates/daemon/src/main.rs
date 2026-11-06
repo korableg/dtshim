@@ -3,8 +3,10 @@ mod server;
 mod session;
 mod signal;
 mod socket;
+mod volume;
 
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use anyhow::Result;
 use clap::Parser;
@@ -28,12 +30,13 @@ async fn main() -> Result<ExitCode> {
 }
 
 async fn run(cli: Cli) -> Result<()> {
+    let volumes = Arc::new(volume::Volumes::new(cli.volume_mapping)?);
     let socket = socket::bind(cli.transport, cli.socket).await?;
     let mut shutdown = Shutdown::new()?;
 
     println!("{}", socket.address()?);
 
-    server::run(socket.as_ref(), shutdown.wait()).await;
+    server::run(socket.as_ref(), shutdown.wait(), volumes).await;
 
     Ok(())
 }
