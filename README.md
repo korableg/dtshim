@@ -43,6 +43,7 @@ ln -s /usr/local/bin/dtshim /usr/bin/git
 | Транспорт (`tcp` или `unix`)          | `--transport <tcp/unix>`         | `DTSHIM_TRANSPORT`      |
 | Путь Unix-сокета                      | `--socket <PATH>`                | `DTSHIM_SOCKET_PATH`    |
 | Соответствия путей хоста и контейнера | `--volume_mapping <HOST:DOCKER>` | `DTSHIM_VOLUME_MAPPING` |
+| Переменные окружения с хоста         | `--host_env <NAME>`              | `DTSHIM_HOST_ENV`       |
 
 Volume mapping позволяет подменять пути в `cwd`, `args`, `env`, `stdin`, `stdout` и `stderr`.
 

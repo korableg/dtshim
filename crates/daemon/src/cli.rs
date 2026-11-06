@@ -32,4 +32,13 @@ pub(crate) struct Cli {
         help = "Map absolute host and Docker paths; repeat the flag or separate mappings with commas"
     )]
     pub(crate) volume_mapping: Vec<Volume>,
+
+    #[arg(
+        long = "host_env",
+        env = env::HOST_ENV,
+        value_delimiter = ',',
+        value_name = "NAME",
+        help = "Keep variables from the host environment; repeat the flag or separate names with commas"
+    )]
+    pub(crate) host_env: Vec<String>,
 }

@@ -31,12 +31,13 @@ async fn main() -> Result<ExitCode> {
 
 async fn run(cli: Cli) -> Result<()> {
     let volumes = Arc::new(volume::Volumes::new(cli.volume_mapping)?);
+    let host_env = Arc::new(cli.host_env);
     let socket = socket::bind(cli.transport, cli.socket).await?;
     let mut shutdown = Shutdown::new()?;
 
     println!("{}", socket.address()?);
 
-    server::run(socket.as_ref(), shutdown.wait(), volumes).await;
+    server::run(socket.as_ref(), shutdown.wait(), volumes, host_env).await;
 
     Ok(())
 }

@@ -12,6 +12,7 @@ pub(crate) async fn run(
     listener: &dyn SocketListener,
     shutdown: impl Future<Output = ()>,
     volumes: Arc<Volumes>,
+    host_env: Arc<Vec<String>>,
 ) {
     let cancellation = CancellationToken::new();
     let mut sessions = JoinSet::new();
@@ -31,8 +32,9 @@ pub(crate) async fn run(
                 Ok(connection) => {
                     let token = cancellation.child_token();
                     let volumes = Arc::clone(&volumes);
+                    let host_env = Arc::clone(&host_env);
                     sessions.spawn(async move {
-                        if let Err(e) = session::run(connection, token, volumes).await {
+                        if let Err(e) = session::run(connection, token, volumes, host_env).await {
                             eprintln!("connection error: {e:#}");
                         }
                     });

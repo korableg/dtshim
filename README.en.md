@@ -47,6 +47,7 @@ creates a socket in a temporary directory.
 | Transport (`tcp` or `unix`)  | `--transport <tcp/unix>`         | `DTSHIM_TRANSPORT`      |
 | Unix socket path             | `--socket <PATH>`                | `DTSHIM_SOCKET_PATH`    |
 | Host/container path mappings | `--volume_mapping <HOST:DOCKER>` | `DTSHIM_VOLUME_MAPPING` |
+| Environment variables from the host | `--host_env <NAME>`        | `DTSHIM_HOST_ENV`       |
 
 Volume mapping replaces paths in `cwd`, `args`, `env`, `stdin`, `stdout`, and `stderr`.
 

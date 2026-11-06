@@ -16,6 +16,7 @@ trap '
 trap 'exit 143' TERM
 
 unset DTSHIM_TRANSPORT DTSHIM_TCP_ADDR DTSHIM_SOCKET_PATH DTSHIM_TEST_ENV
+unset DTSHIM_HOST_ENV DTSHIM_VOLUME_MAPPING DTSHIM_TEST_MISSING
 mkfifo "$temporary/ready"
 target/debug/dtshimd >"$temporary/ready" 2>"$temporary/server.stderr" &
 server_pid=$!
@@ -29,6 +30,7 @@ export DTSHIM_TCP_ADDR="$address"
 ln -s "$PWD/target/debug/dtshim" "$temporary/cat"
 ln -s "$PWD/target/debug/dtshim" "$temporary/printf"
 ln -s "$PWD/target/debug/dtshim" "$temporary/printenv"
+ln -s "$PWD/target/debug/dtshim" "$temporary/sh"
 
 printf 'hello through stdin\n' > "$temporary/input"
 status=0
@@ -50,5 +52,53 @@ cmp "$temporary/expected-env" "$temporary/actual-env"
 kill "$server_pid"
 wait "$server_pid"
 server_pid=
-printf 'TCP integration test passed: default transport, streams, exit status, arguments, and environment\n'
+
+for mode in repeated comma env precedence; do
+    unset DTSHIM_HOST_ENV
+    case "$mode" in
+        repeated)
+            set -- --host_env PATH --host_env DTSHIM_TEST_HOST_ENV --host_env DTSHIM_TEST_MISSING
+            ;;
+        comma)
+            set -- --host_env PATH,DTSHIM_TEST_HOST_ENV,DTSHIM_TEST_MISSING
+            ;;
+        env)
+            export DTSHIM_HOST_ENV=PATH,DTSHIM_TEST_HOST_ENV,DTSHIM_TEST_MISSING
+            set --
+            ;;
+        precedence)
+            export DTSHIM_HOST_ENV=DTSHIM_TEST_ENV
+            set -- --host_env PATH,DTSHIM_TEST_HOST_ENV,DTSHIM_TEST_MISSING
+            ;;
+    esac
+
+    PATH=/usr/bin:/bin DTSHIM_TEST_HOST_ENV=/container/kept DTSHIM_TEST_ENV=host \
+        target/debug/dtshimd --volume_mapping /host:/container "$@" \
+        >"$temporary/ready" 2>"$temporary/server.stderr" &
+    server_pid=$!
+    IFS= read -r address < "$temporary/ready"
+    export DTSHIM_TCP_ADDR="$address"
+
+    {
+        printf '%s\n' /usr/bin:/bin client
+        printf '%s' /container/kept | cksum
+        printf '%s' /host/client | cksum
+    } >"$temporary/expected-host-env"
+
+    PATH=/nonexistent DTSHIM_TEST_HOST_ENV=/container/client DTSHIM_TEST_ENV=client \
+        DTSHIM_TEST_MISSING=client DTSHIM_TEST_MAPPED_ENV=/container/client \
+        "$temporary/sh" -c '
+            printf "%s\n" "$PATH" "$DTSHIM_TEST_ENV"
+            printf "%s" "$DTSHIM_TEST_HOST_ENV" | cksum
+            printf "%s" "$DTSHIM_TEST_MAPPED_ENV" | cksum
+            test "${DTSHIM_TEST_MISSING+x}" != x
+        ' </dev/null >"$temporary/actual-host-env"
+    cmp "$temporary/expected-host-env" "$temporary/actual-host-env"
+
+    kill "$server_pid"
+    wait "$server_pid"
+    server_pid=
+done
+
+printf 'TCP integration test passed: default transport, streams, exit status, arguments, environment, and host environment selection\n'
 SH

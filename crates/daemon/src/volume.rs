@@ -52,8 +52,7 @@ fn left_boundary(byte: u8) -> bool {
     right_boundary(byte)
         || matches!(
             byte,
-            b'='
-                | b':'
+            b'=' | b':'
                 | b','
                 | b';'
                 | b'('
@@ -181,7 +180,10 @@ impl<'a> StreamMapper<'a> {
         if self.pending.is_empty() {
             return;
         }
-        let terminated = self.pending.last().is_some_and(|&byte| right_boundary(byte));
+        let terminated = self
+            .pending
+            .last()
+            .is_some_and(|&byte| right_boundary(byte));
         let candidate_len = self.pending.len() - usize::from(terminated);
         let candidate = &self.pending[..candidate_len];
         match match_prefix(candidate, self.replacements, eof || terminated) {
@@ -429,7 +431,11 @@ mod tests {
                     let mut actual = stream.push(&input.as_bytes()[..split]);
                     actual.extend(stream.push(&input.as_bytes()[split..]));
                     actual.extend(stream.finish());
-                    assert_eq!(actual, expected.as_bytes(), "{mapping}: {input}, split {split}");
+                    assert_eq!(
+                        actual,
+                        expected.as_bytes(),
+                        "{mapping}: {input}, split {split}"
+                    );
                 }
             }
         }
