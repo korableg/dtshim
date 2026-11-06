@@ -13,7 +13,7 @@ dtshim-core = { path = "crates/core" }
 
 [workspace.package]
 edition = "2024"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Titov Dmitry <https://titovde.ru> <titov-de@yandex.ru>"]
 
 [profile.release]
