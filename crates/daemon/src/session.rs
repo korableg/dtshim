@@ -1,4 +1,4 @@
-use std::{os::unix::process::ExitStatusExt, process::Stdio};
+use std::{os::unix::process::ExitStatusExt, process::Stdio, sync::Arc};
 
 use anyhow::{Context, Result, bail, ensure};
 use dtshim_core::{codec::PostcardCodec, model::Message, socket::Connection};
@@ -12,7 +12,13 @@ use tokio_util::{
     sync::CancellationToken,
 };
 
-pub(crate) async fn run(stream: Box<dyn Connection>, cancellation: CancellationToken) -> Result<()> {
+use crate::volume::Volumes;
+
+pub(crate) async fn run(
+    stream: Box<dyn Connection>,
+    cancellation: CancellationToken,
+    volumes: Arc<Volumes>,
+) -> Result<()> {
     let mut child: Option<Child> = None;
 
     let result = {
@@ -23,13 +29,21 @@ pub(crate) async fn run(stream: Box<dyn Connection>, cancellation: CancellationT
 
             if let Some(msg) = rx.next().await {
                 match msg.context("failed to receive start message")? {
-                    Message::Start(start) => {
+                    Message::Start(mut start) => {
                         ensure!(!start.command.is_empty(), "command is empty");
+                        start.cwd = volumes.map_to_host(&start.cwd);
+                        for arg in &mut start.args {
+                            *arg = volumes.map_to_host(arg);
+                        }
+                        for (_, value) in &mut start.env {
+                            *value = volumes.map_to_host(value);
+                        }
                         eprintln!("start: {:?} {:?}", &start.command, &start.args);
 
                         child = match tokio::process::Command::new(&start.command)
                             .args(&start.args)
                             .envs(start.env)
+                            .current_dir(&start.cwd)
                             .stderr(Stdio::piped())
                             .stdin(Stdio::piped())
                             .stdout(Stdio::piped())
@@ -40,7 +54,8 @@ pub(crate) async fn run(stream: Box<dyn Connection>, cancellation: CancellationT
                             Ok(child) => Some(child),
                             Err(err) => {
                                 eprintln!("failed: {err:#}");
-                                let _ = tx.send(Message::Failed(format!("{err:#}"))).await;
+                                let err_msg = volumes.map_from_host(&format!("{err:#}"));
+                                let _ = tx.send(Message::Failed(err_msg)).await;
                                 return Err(err);
                             }
                         };
@@ -57,18 +72,25 @@ pub(crate) async fn run(stream: Box<dyn Connection>, cancellation: CancellationT
             let mut err_buf = vec![0u8; 8192];
 
             let input = async {
+                let mut mapper = volumes.stream_to_host();
                 while let Some(msg) = rx.next().await {
                     match msg.context("failed to receive client message")? {
                         Message::Stdin(data) if data.is_empty() => break,
                         Message::Stdin(data) => {
                             eprintln!("stdin: {:?}", String::from_utf8_lossy(&data));
+                            let data = mapper.push(&data);
                             if let Err(err) = stdin.write_all(&data).await {
                                 eprintln!("stdin error: {err}");
-                                break;
+                                drop(stdin);
+                                return anyhow::Ok(());
                             }
                         }
                         other => bail!("unexpected message from client: {other:?}"),
                     }
+                }
+
+                if let Err(err) = stdin.write_all(&mapper.finish()).await {
+                    eprintln!("stdin error: {err}");
                 }
 
                 drop(stdin);
@@ -80,6 +102,8 @@ pub(crate) async fn run(stream: Box<dyn Connection>, cancellation: CancellationT
             let output = async {
                 let mut stdout_done = false;
                 let mut stderr_done = false;
+                let mut stdout_mapper = volumes.stream_from_host();
+                let mut stderr_mapper = volumes.stream_from_host();
 
                 while !stdout_done || !stderr_done {
                     let message = tokio::select! {
@@ -88,11 +112,13 @@ pub(crate) async fn run(stream: Box<dyn Connection>, cancellation: CancellationT
                                 0 => {
                                     stdout_done = true;
                                     eprintln!("stdout: closed");
-                                    None
+                                    let data = stdout_mapper.finish();
+                                    (!data.is_empty()).then_some(Message::Stdout(data))
                                 }
                                 n => {
                                     eprintln!("stdout: {:?}", String::from_utf8_lossy(&out_buf[..n]));
-                                    Some(Message::Stdout(out_buf[..n].to_vec()))
+                                    let data = stdout_mapper.push(&out_buf[..n]);
+                                    (!data.is_empty()).then_some(Message::Stdout(data))
                                 }
                             }
                         }
@@ -102,11 +128,13 @@ pub(crate) async fn run(stream: Box<dyn Connection>, cancellation: CancellationT
                                 0 => {
                                     stderr_done = true;
                                     eprintln!("stderr: closed");
-                                    None
+                                    let data = stderr_mapper.finish();
+                                    (!data.is_empty()).then_some(Message::Stderr(data))
                                 }
                                 n => {
                                     eprintln!("stderr: {:?}", String::from_utf8_lossy(&err_buf[..n]));
-                                    Some(Message::Stderr(err_buf[..n].to_vec()))
+                                    let data = stderr_mapper.push(&err_buf[..n]);
+                                    (!data.is_empty()).then_some(Message::Stderr(data))
                                 }
                             }
                         }

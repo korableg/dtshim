@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use clap::Parser;
 use dtshim_core::{env, socket::Transport};
 
+use crate::volume::Volume;
+
 #[derive(Debug, Parser)]
 #[command(
     name = "dtshimd",
@@ -21,4 +23,13 @@ pub(crate) struct Cli {
         help = "Unix socket path; requires unix transport (defaults to a temporary directory)"
     )]
     pub(crate) socket: Option<PathBuf>,
+
+    #[arg(
+        long = "volume_mapping",
+        env = env::VOLUME_MAPPING,
+        value_delimiter = ',',
+        value_name = "HOST:DOCKER",
+        help = "Map absolute host and Docker paths; repeat the flag or separate mappings with commas"
+    )]
+    pub(crate) volume_mapping: Vec<Volume>,
 }
