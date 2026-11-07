@@ -81,7 +81,12 @@ enum PrefixMatch {
     Mapped { prefix: PathBuf, consumed: usize },
 }
 
-fn match_prefix(candidate: &[u8], replacements: &[Replacement], complete: bool) -> PrefixMatch {
+fn match_prefix(
+    candidate: &[u8],
+    replacements: &[Replacement],
+    complete: bool,
+    terminates_path: impl Fn(u8) -> bool,
+) -> PrefixMatch {
     for replacement in replacements {
         let source = replacement.from.as_bytes();
         if candidate.len() < source.len() {
@@ -97,11 +102,11 @@ fn match_prefix(candidate: &[u8], replacements: &[Replacement], complete: bool) 
         if next.is_none() && !complete {
             return PrefixMatch::Pending;
         }
-        if source != b"/" && next.is_some_and(|byte| byte != b'/') {
+        if source != b"/" && next.is_some_and(|byte| byte != b'/' && !terminates_path(byte)) {
             continue;
         }
         let needs_slash = if source == b"/" {
-            next.is_some()
+            next.is_some_and(|byte| !terminates_path(byte))
         } else {
             next == Some(b'/')
         };
@@ -146,6 +151,7 @@ impl<'a> StreamMapper<'a> {
                 if right_boundary(byte) {
                     self.passthrough = false;
                 }
+                self.previous = Some(byte);
             } else if !self.pending.is_empty()
                 || (byte == b'/' && self.previous.is_none_or(left_boundary))
             {
@@ -153,8 +159,8 @@ impl<'a> StreamMapper<'a> {
                 self.resolve(&mut output, false);
             } else {
                 output.push(byte);
+                self.previous = Some(byte);
             }
-            self.previous = Some(byte);
         }
         output
     }
@@ -178,25 +184,34 @@ impl<'a> StreamMapper<'a> {
     }
 
     fn resolve(&mut self, output: &mut Vec<u8>, eof: bool) {
-        if self.pending.is_empty() {
-            return;
-        }
-        let terminated = self
-            .pending
-            .last()
-            .is_some_and(|&byte| right_boundary(byte));
-        let candidate_len = self.pending.len() - usize::from(terminated);
-        let candidate = &self.pending[..candidate_len];
-        match match_prefix(candidate, self.replacements, eof || terminated) {
-            PrefixMatch::Pending => return,
-            PrefixMatch::Unmatched => output.extend_from_slice(&self.pending),
-            PrefixMatch::Mapped { prefix, consumed } => {
-                output.extend_from_slice(prefix.as_os_str().as_bytes());
-                output.extend_from_slice(&self.pending[consumed..]);
+        let mut offset = 0;
+        while offset < self.pending.len() {
+            let byte = self.pending[offset];
+            if self.passthrough {
+                self.passthrough = !right_boundary(byte);
+            } else if byte == b'/' && self.previous.is_none_or(left_boundary) {
+                match match_prefix(
+                    &self.pending[offset..],
+                    self.replacements,
+                    eof,
+                    right_boundary,
+                ) {
+                    PrefixMatch::Pending => break,
+                    PrefixMatch::Unmatched => self.passthrough = true,
+                    PrefixMatch::Mapped { prefix, consumed } => {
+                        output.extend_from_slice(prefix.as_os_str().as_bytes());
+                        offset += consumed;
+                        self.previous = Some(self.pending[offset - 1]);
+                        self.passthrough = true;
+                        continue;
+                    }
+                }
             }
+            output.push(byte);
+            self.previous = Some(byte);
+            offset += 1;
         }
-        self.passthrough = !terminated;
-        self.pending.clear();
+        self.pending.drain(..offset);
     }
 }
 
@@ -252,8 +267,17 @@ impl Volumes {
         Self::map(data, &self.to_host)
     }
 
+    fn map_path_to_host(&self, path: &str) -> String {
+        match match_prefix(path.as_bytes(), &self.to_host, true, |_| false) {
+            PrefixMatch::Mapped { prefix, consumed } => {
+                format!("{}{}", prefix.display(), &path[consumed..])
+            }
+            _ => path.to_owned(),
+        }
+    }
+
     pub(crate) fn map_start(&self, mut start: Start) -> Start {
-        start.cwd = self.map_to_host(&start.cwd);
+        start.cwd = self.map_path_to_host(&start.cwd);
         for arg in &mut start.args {
             *arg = self.map_to_host(arg);
         }
@@ -264,35 +288,10 @@ impl Volumes {
     }
 
     fn map(data: &str, replacements: &[Replacement]) -> String {
-        if replacements.is_empty() {
-            return data.to_owned();
-        }
-        let mut output = String::with_capacity(data.len());
-        let mut copied = 0;
-        let mut offset = 0;
-        let bytes = data.as_bytes();
-        while offset < bytes.len() {
-            let previous = offset.checked_sub(1).map(|index| bytes[index]);
-            if bytes[offset] != b'/' || !previous.is_none_or(left_boundary) {
-                offset += 1;
-                continue;
-            }
-            let end = bytes[offset..]
-                .iter()
-                .position(|&byte| right_boundary(byte))
-                .map_or(bytes.len(), |length| offset + length);
-            if let PrefixMatch::Mapped { prefix, consumed } =
-                match_prefix(&bytes[offset..end], replacements, true)
-            {
-                output.push_str(&data[copied..offset]);
-                output.push_str(&prefix.to_string_lossy());
-                output.push_str(&data[offset + consumed..end]);
-                copied = end;
-            }
-            offset = end;
-        }
-        output.push_str(&data[copied..]);
-        output
+        let mut mapper = StreamMapper::new(replacements);
+        let mut output = mapper.push(data.as_bytes());
+        output.extend(mapper.finish());
+        String::from_utf8(output).expect("mapping valid UTF-8 paths preserves UTF-8")
     }
 
     pub(crate) fn stream_from_host(&self) -> StreamMapper<'_> {
@@ -322,9 +321,221 @@ mod tests {
         ])
     }
 
+    fn assert_mapping(volumes: &Volumes, from_host: bool, input: &[u8], expected: &[u8]) {
+        if let Ok(input) = std::str::from_utf8(input) {
+            let mapped = if from_host {
+                volumes.map_from_host(input)
+            } else {
+                volumes.map_to_host(input)
+            };
+            assert_eq!(
+                mapped.as_bytes(),
+                expected,
+                "{input:?}, from_host={from_host}"
+            );
+        }
+        let make_stream = || {
+            if from_host {
+                volumes.stream_from_host()
+            } else {
+                volumes.stream_to_host()
+            }
+        };
+        for split in 0..=input.len() {
+            let mut stream = make_stream();
+            let mut actual = stream.push(&input[..split]);
+            assert!(stream.pending.len() <= stream.pending_limit);
+            actual.extend(stream.push(&input[split..]));
+            assert!(stream.pending.len() <= stream.pending_limit);
+            actual.extend(stream.finish());
+            assert_eq!(
+                actual, expected,
+                "{input:?}, from_host={from_host}, split={split}"
+            );
+            assert!(stream.finish().is_empty());
+        }
+        let mut stream = make_stream();
+        let mut actual = Vec::new();
+        for &byte in input {
+            actual.extend(stream.push(&[byte]));
+            assert!(stream.pending.len() <= stream.pending_limit);
+        }
+        actual.extend(stream.finish());
+        assert_eq!(
+            actual, expected,
+            "{input:?}, from_host={from_host}, bytewise"
+        );
+        assert!(stream.finish().is_empty());
+    }
+
+    #[test]
+    fn complete_prefixes_include_literal_spaces_and_quotes_in_both_directions() {
+        let mapping = volumes(&[
+            "/host:/app",
+            "/host dir:/app dir",
+            "/nested host:/app dir/nested",
+            "/host's dir:/app's dir",
+            "/host\"dir:/app\"dir",
+            "/host\tpart:/app\tpart",
+            "/host\npart:/app\npart",
+            "/app dir:/staging dir",
+        ]);
+        for (docker, host) in [
+            ("/app dir/file", "/host dir/file"),
+            ("--file=/app dir/file", "--file=/host dir/file"),
+            (
+                "\"/app dir/a\" '/app's dir/b'",
+                "\"/host dir/a\" '/host's dir/b'",
+            ),
+            ("/app\"dir/a /app's dir/b", "/host\"dir/a /host's dir/b"),
+            ("/app\tpart/file", "/host\tpart/file"),
+            ("/app\npart/file", "/host\npart/file"),
+            (
+                "/app dir/nested/file /app dir/file",
+                "/nested host/file /host dir/file",
+            ),
+            ("/app dir/nest", "/host dir/nest"),
+            ("/app dir/nesteX", "/host dir/nesteX"),
+            ("/staging dir/file", "/app dir/file"),
+        ] {
+            assert_mapping(&mapping, false, docker.as_bytes(), host.as_bytes());
+            assert_mapping(&mapping, true, host.as_bytes(), docker.as_bytes());
+        }
+        assert_mapping(
+            &mapping,
+            false,
+            b"/app dir/\xff\xfe /app's dir/\xff",
+            b"/host dir/\xff\xfe /host's dir/\xff",
+        );
+        assert_mapping(
+            &mapping,
+            true,
+            b"/host dir/\xff\xfe /host's dir/\xff",
+            b"/app dir/\xff\xfe /app's dir/\xff",
+        );
+    }
+
+    #[test]
+    fn failed_longer_prefixes_rescan_the_buffered_tail_after_fallback() {
+        let mapping = volumes(&["/h:/a", "/h /k host:/a /b docker", "/k:/b", "/better:/beta"]);
+        for (docker, host) in [
+            ("/a /b docker/file", "/h /k host/file"),
+            ("/a /b", "/h /k"),
+            ("/a /b doc", "/h /k doc"),
+            ("/a /b dockX /a", "/h /k dockX /h"),
+            ("/a /beta/file", "/h /better/file"),
+            ("/a /b /a", "/h /k /h"),
+        ] {
+            assert_mapping(&mapping, false, docker.as_bytes(), host.as_bytes());
+            assert_mapping(&mapping, true, host.as_bytes(), docker.as_bytes());
+        }
+        let forward = volumes(&["/special:/a /beta delta", "/other:/beta"]);
+        let reverse = volumes(&["/a /beta delta:/special", "/beta:/other"]);
+        for (input, expected) in [
+            ("/a /beta", "/a /other"),
+            ("/a /beta delt", "/a /other delt"),
+            ("/a /betaX /beta/file", "/a /betaX /other/file"),
+        ] {
+            assert_mapping(&forward, false, input.as_bytes(), expected.as_bytes());
+            assert_mapping(&reverse, true, input.as_bytes(), expected.as_bytes());
+        }
+    }
+
+    #[test]
+    fn literal_prefixes_still_require_path_segment_boundaries() {
+        let mapping = volumes(&[
+            "/host dir:/app dir",
+            "/host'quote:/app'quote",
+            "/host\"quote:/app\"quote",
+        ]);
+        for input in [
+            "/app directory /app dir-extra /app dir.txt",
+            "/host directory /host dir-extra /host dir.txt",
+            "./app dir ../app dir relative/app dir",
+            "/app'quoted /host'quoted /app\"quoted /host\"quoted",
+        ] {
+            assert_mapping(&mapping, false, input.as_bytes(), input.as_bytes());
+            assert_mapping(&mapping, true, input.as_bytes(), input.as_bytes());
+        }
+    }
+
+    #[test]
+    fn structured_paths_and_root_mapping_keep_their_own_boundaries() {
+        let mapping = volumes(&["/host dir:/app dir", "/nested host:/app dir/nested"]);
+        let start = Start {
+            token: Some("/app dir/raw-token".into()),
+            command: "tool".into(),
+            args: vec!["--file=/app dir/file".into()],
+            env: vec![("FILE".into(), "/app dir/file".into())],
+            cwd: "/app dir/work".into(),
+        };
+        let mapped = mapping.map_start(start);
+        assert_eq!(mapped.cwd, "/host dir/work");
+        assert_eq!(mapped.args, ["--file=/host dir/file"]);
+        assert_eq!(
+            mapped.env,
+            [("FILE".to_owned(), "/host dir/file".to_owned())]
+        );
+        assert_eq!(mapped.token.as_deref(), Some("/app dir/raw-token"));
+        assert_eq!(
+            mapping.map_path_to_host("/app dir/work /app dir/other"),
+            "/host dir/work /app dir/other"
+        );
+        let overlap = volumes(&["/host:/app", "/nested:/app dir/nested"]);
+        assert_eq!(overlap.map_path_to_host("/app directory"), "/app directory");
+        assert_mapping(&overlap, false, b"/app directory", b"/host directory");
+        let root = volumes(&["/host:/"]);
+        assert_mapping(&root, false, b"/ ", b"/host ");
+        assert_mapping(&root, true, b"/host ", b"/ ");
+        assert_eq!(root.map_path_to_host("/ work"), "/host/ work");
+    }
+
+    #[test]
+    fn ambiguous_prefix_buffering_stays_bounded_and_suffixes_stream_immediately() {
+        let mapping = volumes(&["/host:/app", "/long host:/app dir/nested"]);
+        let mut stream = mapping.stream_to_host();
+        assert!(stream.push(b"/app ").is_empty());
+        assert_eq!(stream.pending, b"/app ");
+        assert_eq!(stream.push(b"dir/nested/"), b"/long host/");
+        assert!(stream.pending.is_empty());
+        let suffix = "x".repeat(100_000);
+        assert_eq!(stream.push(suffix.as_bytes()), suffix.as_bytes());
+        assert!(stream.pending.is_empty());
+        assert!(stream.finish().is_empty());
+    }
+
+    #[test]
+    fn structured_paths_preserve_spaces_and_choose_the_longest_segment_prefix() {
+        let mapping = volumes(&[
+            "/host:/app dir",
+            "/nested:/app dir/nested",
+            "/space host:/quoted'path",
+        ]);
+        for (input, expected) in [
+            ("/app dir/work", "/host/work"),
+            ("/app dir", "/host"),
+            ("/app dir/nested/work", "/nested/work"),
+            ("/app directory/work", "/app directory/work"),
+            ("/app dir-extra/work", "/app dir-extra/work"),
+            ("relative/app dir", "relative/app dir"),
+            ("/quoted'path/work", "/space host/work"),
+        ] {
+            assert_eq!(mapping.map_path_to_host(input), expected);
+        }
+        assert_eq!(
+            volumes(&["/host:/"]).map_path_to_host("/work dir"),
+            "/host/work dir"
+        );
+        assert_eq!(
+            volumes(&["/:/app dir"]).map_path_to_host("/app dir/work"),
+            "/work"
+        );
+    }
+
     #[test]
     fn maps_start_paths_without_changing_command_or_env_names() {
         let start = Start {
+            token: Some("/app/raw-token".to_owned()),
             command: "/app/tool".to_owned(),
             args: vec!["--file=/app/input".to_owned(), "unchanged".to_owned()],
             env: vec![
@@ -334,6 +545,7 @@ mod tests {
             cwd: "/app/work".to_owned(),
         };
         let mapped = volumes(&["/host:/app"]).map_start(start);
+        assert_eq!(mapped.token.as_deref(), Some("/app/raw-token"));
         assert_eq!(mapped.command, "/app/tool");
         assert_eq!(mapped.args, ["--file=/host/input", "unchanged"]);
         assert_eq!(
