@@ -25,6 +25,14 @@ pub(crate) struct Cli {
     pub(crate) socket: Option<PathBuf>,
 
     #[arg(
+        long,
+        env = env::POLICY,
+        value_name = "FILE",
+        help = "Allow only commands and arguments declared in this YAML policy"
+    )]
+    pub(crate) policy: Option<PathBuf>,
+
+    #[arg(
         long = "volume_mapping",
         env = env::VOLUME_MAPPING,
         value_delimiter = ',',
@@ -32,13 +40,4 @@ pub(crate) struct Cli {
         help = "Map absolute host and Docker paths; repeat the flag or separate mappings with commas"
     )]
     pub(crate) volume_mapping: Vec<Volume>,
-
-    #[arg(
-        long = "host_env",
-        env = env::HOST_ENV,
-        value_delimiter = ',',
-        value_name = "NAME",
-        help = "Keep variables from the host environment; repeat the flag or separate names with commas"
-    )]
-    pub(crate) host_env: Vec<String>,
 }

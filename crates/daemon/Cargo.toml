@@ -13,6 +13,10 @@ anyhow.workspace = true
 clap.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
+serde.workspace = true
+serde-saphyr = { version = "2.1", default-features = false, features = ["deserialize", "garde"] }
+garde = { version = "0.23", default-features = false, features = ["derive", "regex"] }
+regex = "1"
 
 
 dtshim-core.workspace = true

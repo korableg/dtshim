@@ -4,15 +4,14 @@ use std::sync::Arc;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
+use crate::context::Ctx;
 use crate::session;
 use crate::socket::SocketListener;
-use crate::volume::Volumes;
 
 pub(crate) async fn run(
     listener: &dyn SocketListener,
     shutdown: impl Future<Output = ()>,
-    volumes: Arc<Volumes>,
-    host_env: Arc<Vec<String>>,
+    context: Arc<Ctx>,
 ) {
     let cancellation = CancellationToken::new();
     let mut sessions = JoinSet::new();
@@ -31,10 +30,9 @@ pub(crate) async fn run(
             res = listener.accept() => match res {
                 Ok(connection) => {
                     let token = cancellation.child_token();
-                    let volumes = Arc::clone(&volumes);
-                    let host_env = Arc::clone(&host_env);
+                    let context = Arc::clone(&context);
                     sessions.spawn(async move {
-                        if let Err(e) = session::run(connection, token, volumes, host_env).await {
+                        if let Err(e) = session::run(connection, token, context).await {
                             eprintln!("connection error: {e:#}");
                         }
                     });

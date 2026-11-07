@@ -43,7 +43,7 @@ ln -s /usr/local/bin/dtshim /usr/bin/git
 | Транспорт (`tcp` или `unix`)          | `--transport <tcp/unix>`         | `DTSHIM_TRANSPORT`      |
 | Путь Unix-сокета                      | `--socket <PATH>`                | `DTSHIM_SOCKET_PATH`    |
 | Соответствия путей хоста и контейнера | `--volume_mapping <HOST:DOCKER>` | `DTSHIM_VOLUME_MAPPING` |
-| Переменные окружения с хоста         | `--host_env <NAME>`              | `DTSHIM_HOST_ENV`       |
+| Политика разрешённых команд           | `--policy <FILE>`                | `DTSHIM_POLICY`         |
 
 Volume mapping позволяет подменять пути в `cwd`, `args`, `env`, `stdin`, `stdout` и `stderr`.
 
@@ -64,6 +64,23 @@ Volume mapping позволяет подменять пути в `cwd`, `args`, 
 DTSHIM_TRANSPORT=unix DTSHIM_SOCKET_PATH=/run/dtshim/socket git --version
 DTSHIM_TRANSPORT=tcp DTSHIM_TCP_ADDR=host.docker.internal:20001 git --version
 ```
+
+## Разрешённые команды и аргументы
+
+[Пример политики](examples/policy.yaml):
+
+```sh
+dtshimd --policy examples/policy.yaml
+```
+
+Без политики команды не ограничены. С политикой вызов должен совпасть с одним
+из вариантов `allow`; `executable` задаёт абсолютный путь на хосте независимо от `PATH` клиента.
+
+В `host_env: [HOME, {LANG: "C.UTF-8"}]` имя сохраняет значение демона, а пара задаёт
+фиксированное значение; клиент не может их переопределить.
+
+`value` и `positionals` проверяются regexp целиком; `required` делает опцию обязательной,
+`repeat` разрешает повторы. Изменения политики применяются после перезапуска демона.
 
 ## Пример использования на Linux
 
@@ -150,3 +167,11 @@ docker run --rm --network host \
 
 Этот TCP-пример рассчитан на Docker Engine на Linux: сеть хоста позволяет
 контейнеру подключиться к `127.0.0.1` демона.
+
+## Тесты
+
+```sh
+cargo test --locked --workspace --lib --bins
+cargo build --locked --workspace --bins
+cargo test --locked -p integration
+```

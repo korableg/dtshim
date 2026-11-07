@@ -1,0 +1,14 @@
+commands:
+  git:
+    executable: /usr/bin/git
+    host_env: [HOME, SSH_AUTH_SOCK, {LANG: "C.UTF-8"}, {GIT_CONFIG_NOSYSTEM: "1"}]
+    allow:
+      - prefix: [status]
+        options:
+          - names: [--short, -s]
+          - names: [--branch, -b]
+      - prefix: [log]
+        options:
+          - names: [--oneline]
+          - names: [--max-count, -n]
+            value: '[1-9][0-9]?'

@@ -47,7 +47,7 @@ creates a socket in a temporary directory.
 | Transport (`tcp` or `unix`)  | `--transport <tcp/unix>`         | `DTSHIM_TRANSPORT`      |
 | Unix socket path             | `--socket <PATH>`                | `DTSHIM_SOCKET_PATH`    |
 | Host/container path mappings | `--volume_mapping <HOST:DOCKER>` | `DTSHIM_VOLUME_MAPPING` |
-| Environment variables from the host | `--host_env <NAME>`        | `DTSHIM_HOST_ENV`       |
+| Allowed commands policy      | `--policy <FILE>`                | `DTSHIM_POLICY`         |
 
 Volume mapping replaces paths in `cwd`, `args`, `env`, `stdin`, `stdout`, and `stderr`.
 
@@ -67,6 +67,23 @@ The client requires the address or socket path to be passed through environment 
 DTSHIM_TRANSPORT=unix DTSHIM_SOCKET_PATH=/run/dtshim/socket git --version
 DTSHIM_TRANSPORT=tcp DTSHIM_TCP_ADDR=host.docker.internal:20001 git --version
 ```
+
+## Allowed commands and arguments
+
+[Example policy](examples/policy.yaml):
+
+```sh
+dtshimd --policy examples/policy.yaml
+```
+
+Without a policy, commands are unrestricted. With a policy, each invocation must match
+an `allow` variant; `executable` pins an absolute host path regardless of the client's `PATH`.
+
+In `host_env: [HOME, {LANG: "C.UTF-8"}]`, a name preserves the daemon's value and a pair
+sets a fixed value; the client cannot override either.
+
+`value` and `positionals` use full regex matches; `required` makes an option mandatory,
+while `repeat` permits repetitions. Restart the daemon to apply policy changes.
 
 ## Usage example on Linux
 
@@ -153,3 +170,11 @@ docker run --rm --network host \
 
 This TCP example targets Docker Engine on Linux: host networking lets the
 container connect to the daemon's `127.0.0.1` address.
+
+## Tests
+
+```sh
+cargo test --locked --workspace --lib --bins
+cargo build --locked --workspace --bins
+cargo test --locked -p integration
+```
