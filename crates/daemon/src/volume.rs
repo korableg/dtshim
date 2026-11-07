@@ -6,6 +6,7 @@ use std::{
 };
 
 use anyhow::{Result, bail, ensure};
+use dtshim_core::model::Start;
 
 #[derive(Clone, Debug)]
 pub(crate) struct Volume {
@@ -251,6 +252,17 @@ impl Volumes {
         Self::map(data, &self.to_host)
     }
 
+    pub(crate) fn map_start(&self, mut start: Start) -> Start {
+        start.cwd = self.map_to_host(&start.cwd);
+        for arg in &mut start.args {
+            *arg = self.map_to_host(arg);
+        }
+        for (_, value) in &mut start.env {
+            *value = self.map_to_host(value);
+        }
+        start
+    }
+
     fn map(data: &str, replacements: &[Replacement]) -> String {
         if replacements.is_empty() {
             return data.to_owned();
@@ -308,6 +320,30 @@ mod tests {
             "/other:/host",
             "/данные:/контейнер",
         ])
+    }
+
+    #[test]
+    fn maps_start_paths_without_changing_command_or_env_names() {
+        let start = Start {
+            command: "/app/tool".to_owned(),
+            args: vec!["--file=/app/input".to_owned(), "unchanged".to_owned()],
+            env: vec![
+                ("/app/name".to_owned(), "/app/value".to_owned()),
+                ("OTHER".to_owned(), "unchanged".to_owned()),
+            ],
+            cwd: "/app/work".to_owned(),
+        };
+        let mapped = volumes(&["/host:/app"]).map_start(start);
+        assert_eq!(mapped.command, "/app/tool");
+        assert_eq!(mapped.args, ["--file=/host/input", "unchanged"]);
+        assert_eq!(
+            mapped.env,
+            vec![
+                ("/app/name".to_owned(), "/host/value".to_owned()),
+                ("OTHER".to_owned(), "unchanged".to_owned()),
+            ]
+        );
+        assert_eq!(mapped.cwd, "/host/work");
     }
 
     #[test]

@@ -1,4 +1,7 @@
 mod cli;
+mod context;
+mod policy;
+mod policy_config;
 mod server;
 mod session;
 mod signal;
@@ -12,6 +15,8 @@ use anyhow::Result;
 use clap::Parser;
 
 use crate::cli::Cli;
+use crate::context::Ctx;
+use crate::policy::Policy;
 use crate::signal::Shutdown;
 
 #[tokio::main(flavor = "current_thread")]
@@ -30,14 +35,16 @@ async fn main() -> Result<ExitCode> {
 }
 
 async fn run(cli: Cli) -> Result<()> {
-    let volumes = Arc::new(volume::Volumes::new(cli.volume_mapping)?);
-    let host_env = Arc::new(cli.host_env);
+    let context = Arc::new(Ctx {
+        policy: Policy::new(cli.policy.as_deref())?,
+        volumes: volume::Volumes::new(cli.volume_mapping)?,
+    });
     let socket = socket::bind(cli.transport, cli.socket).await?;
     let mut shutdown = Shutdown::new()?;
 
     println!("{}", socket.address()?);
 
-    server::run(socket.as_ref(), shutdown.wait(), volumes, host_env).await;
+    server::run(socket.as_ref(), shutdown.wait(), context).await;
 
     Ok(())
 }

@@ -1,0 +1,11 @@
+[package]
+name = "integration"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+publish = false
+
+[dev-dependencies]
+assert_cmd = "2"
+tempfile = "3"
+tokio.workspace = true

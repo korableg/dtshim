@@ -1,6 +1,6 @@
 use std::{os::unix::process::ExitStatusExt, process::Stdio, sync::Arc};
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, bail};
 use dtshim_core::{codec::PostcardCodec, model::Message, socket::Connection};
 use futures::{SinkExt, StreamExt};
 use tokio::{
@@ -12,14 +12,14 @@ use tokio_util::{
     sync::CancellationToken,
 };
 
-use crate::volume::Volumes;
+use crate::context::Ctx;
 
 pub(crate) async fn run(
     stream: Box<dyn Connection>,
     cancellation: CancellationToken,
-    volumes: Arc<Volumes>,
-    host_env: Arc<Vec<String>>,
+    context: Arc<Ctx>,
 ) -> Result<()> {
+    let volumes = &context.volumes;
     let mut child: Option<Child> = None;
 
     let result = {
@@ -30,16 +30,18 @@ pub(crate) async fn run(
 
             if let Some(msg) = rx.next().await {
                 match msg.context("failed to receive start message")? {
-                    Message::Start(mut start) => {
-                        ensure!(!start.command.is_empty(), "command is empty");
-                        start.cwd = volumes.map_to_host(&start.cwd);
-                        for arg in &mut start.args {
-                            *arg = volumes.map_to_host(arg);
-                        }
-                        start.env.retain(|(name, _)| !host_env.contains(name));
-                        for (_, value) in &mut start.env {
-                            *value = volumes.map_to_host(value);
-                        }
+                    Message::Start(start) => {
+                        let start = match context.prepare(start) {
+                            Ok(start) => start,
+                            Err(err) => {
+                                let message =
+                                    volumes.map_from_host(&format!("policy denied: {err:#}"));
+                                tx.send(Message::Failed(message))
+                                    .await
+                                    .context("failed to send policy denial")?;
+                                return Ok(());
+                            }
+                        };
                         eprintln!("start: {:?} {:?}", &start.command, &start.args);
 
                         child = match tokio::process::Command::new(&start.command)
