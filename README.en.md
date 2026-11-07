@@ -104,16 +104,19 @@ which already has Git installed.
 
 Download the archive for your platform from [Releases](https://github.com/korableg/dtshim/releases).
 
-| Host platform       | Archive                                    |
-| ------------------- | ------------------------------------------ |
-| Linux x86_64        | `dtshim-x86_64-unknown-linux-musl.tar.gz`  |
-| Linux ARM64         | `dtshim-aarch64-unknown-linux-musl.tar.gz` |
-| macOS Apple Silicon | `dtshim-aarch64-apple-darwin.tar.gz`       |
+| Host platform       | Archive                                  |
+| ------------------- | ---------------------------------------- |
+| Linux x86_64        | `dtshim-<version>-linux-x86_64.tar.gz`     |
+| Linux ARM64         | `dtshim-<version>-linux-arm64.tar.gz`      |
+| macOS Apple Silicon | `dtshim-<version>-macos-arm64.tar.gz`      |
+
+`<version>` is the selected release tag, for example `v0.6.0`.
 
 Each archive contains `dtshim` and `dtshimd`. To install the daemon on Linux x86_64:
 
 ```sh
-tar -xzf dtshim-x86_64-unknown-linux-musl.tar.gz dtshimd
+VERSION=v0.6.0
+tar -xzf "dtshim-$VERSION-linux-x86_64.tar.gz" dtshimd
 mkdir -p "$HOME/.local/bin"
 install -m 755 dtshimd "$HOME/.local/bin/dtshimd"
 
