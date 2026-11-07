@@ -101,17 +101,20 @@ dtshimd --policy examples/policy.yaml
 
 Скачайте архив для своей платформы из [Releases](https://github.com/korableg/dtshim/releases).
 
-| Платформа хоста     | Архив                                      |
-| ------------------- | ------------------------------------------ |
-| Linux x86_64        | `dtshim-x86_64-unknown-linux-musl.tar.gz`  |
-| Linux ARM64         | `dtshim-aarch64-unknown-linux-musl.tar.gz` |
-| macOS Apple Silicon | `dtshim-aarch64-apple-darwin.tar.gz`       |
+| Платформа хоста      | Архив                                    |
+| ------------------- | ---------------------------------------- |
+| Linux x86_64        | `dtshim-<version>-linux-x86_64.tar.gz`     |
+| Linux ARM64         | `dtshim-<version>-linux-arm64.tar.gz`      |
+| macOS Apple Silicon | `dtshim-<version>-macos-arm64.tar.gz`      |
+
+`<version>` — тег выбранного релиза, например `v0.6.0`.
 
 Каждый архив содержит `dtshim` и `dtshimd`. Для Linux x86_64 установка демона
 выглядит так:
 
 ```sh
-tar -xzf dtshim-x86_64-unknown-linux-musl.tar.gz dtshimd
+VERSION=v0.6.0
+tar -xzf "dtshim-$VERSION-linux-x86_64.tar.gz" dtshimd
 mkdir -p "$HOME/.local/bin"
 install -m 755 dtshimd "$HOME/.local/bin/dtshimd"
 

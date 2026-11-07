@@ -220,7 +220,6 @@ mod tests {
             r#"{allow: ["A\0B"]}"#,
             "{allow: [HOME, HOME]}",
             "{allow: HOME}",
-            "{allow: [1]}",
             "{typo: []}",
         ] {
             let yaml =
@@ -231,6 +230,7 @@ mod tests {
             "{}",
             "{allow: null}",
             "{allow: []}",
+            "{allow: [1]}",
             "{host: [HOME, {LANG: C}], allow: [HOME, LANG]}",
         ] {
             let yaml =

@@ -46,15 +46,20 @@ jobs:
         include:
           - runner: ubuntu-24.04
             target: x86_64-unknown-linux-musl
+            archive-platform: linux-x86_64
             image-arch: amd64
           - runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
+            archive-platform: linux-arm64
             image-arch: arm64
           - runner: macos-15
             target: aarch64-apple-darwin
+            archive-platform: macos-arm64
     env:
       TARGET: ${{ matrix.target }}
+      ARCHIVE_PLATFORM: ${{ matrix.archive-platform }}
       IMAGE_ARCH: ${{ matrix.image-arch }}
+      DTSHIM_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || format('latest-{0}', github.sha) }}
     steps:
       - uses: actions/checkout@v7
 
@@ -71,20 +76,23 @@ jobs:
 
       - name: Build release binaries
         env:
-          DTSHIM_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || format('latest-{0}', github.sha) }}
           RUSTFLAGS: ${{ runner.os == 'Linux' && '-C target-feature=+crt-static -C linker=musl-gcc' || '' }}
         run: cargo build --locked --release --workspace --bins --target "$TARGET"
 
       - name: Create archive
+        id: archive
         run: |
+          archive_version="${DTSHIM_VERSION//[^a-zA-Z0-9._+-]/-}"
+          archive_name="dtshim-$archive_version-$ARCHIVE_PLATFORM.tar.gz"
           mkdir -p dist
-          tar -czf "dist/dtshim-$TARGET.tar.gz" -C "target/$TARGET/release" dtshim dtshimd
+          tar -czf "dist/$archive_name" -C "target/$TARGET/release" dtshim dtshimd
+          printf 'name=%s\n' "$archive_name" >> "$GITHUB_OUTPUT"
 
       - name: Upload archive
         uses: actions/upload-artifact@v7
         with:
-          name: dtshim-${{ matrix.target }}.tar.gz
-          path: dist/dtshim-${{ matrix.target }}.tar.gz
+          name: ${{ steps.archive.outputs.name }}
+          path: dist/${{ steps.archive.outputs.name }}
           archive: false
           if-no-files-found: error
 
