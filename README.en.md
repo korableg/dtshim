@@ -48,6 +48,7 @@ creates a socket in a temporary directory.
 | Unix socket path             | `--socket <PATH>`                | `DTSHIM_SOCKET_PATH`    |
 | Host/container path mappings | `--volume_mapping <HOST:DOCKER>` | `DTSHIM_VOLUME_MAPPING` |
 | Allowed commands policy      | `--policy <FILE>`                | `DTSHIM_POLICY`         |
+| Connection token             | `--token <TOKEN>`                | `DTSHIM_TOKEN`          |
 
 Volume mapping replaces paths in `cwd`, `args`, `env`, `stdin`, `stdout`, and `stderr`.
 
@@ -60,8 +61,14 @@ The client also defaults to TCP. Configure it only through environment variables
 | Transport (`tcp` or `unix`) | —        | `DTSHIM_TRANSPORT`   |
 | TCP address (`HOST:PORT`)   | —        | `DTSHIM_TCP_ADDR`    |
 | Unix socket path            | —        | `DTSHIM_SOCKET_PATH` |
+| Connection token            | —        | `DTSHIM_TOKEN`       |
 
 The client requires the address or socket path to be passed through environment variables.
+
+The token is optional: if set on the daemon, pass the same `DTSHIM_TOKEN` to the client.
+Update the client and daemon together.
+
+Daemon limits: 128 sessions, 10 seconds for the first complete request after accepting a connection.
 
 ```sh
 DTSHIM_TRANSPORT=unix DTSHIM_SOCKET_PATH=/run/dtshim/socket git --version
@@ -79,8 +86,11 @@ dtshimd --policy examples/policy.yaml
 Without a policy, commands are unrestricted. With a policy, each invocation must match
 an `allow` variant; `executable` pins an absolute host path regardless of the client's `PATH`.
 
-In `host_env: [HOME, {LANG: "C.UTF-8"}]`, a name preserves the daemon's value and a pair
+In `env.host: [HOME, {LANG: "C.UTF-8"}]`, a name preserves the daemon's value and a pair
 sets a fixed value; the client cannot override either.
+
+`env.allow`: `null`/omitted permits all client variables, `[]` none, a list only the named ones.
+Names in `env.host` must belong to the configured `env.allow` list; daemon inheritance is unchanged.
 
 `value` and `positionals` use full regex matches; `required` makes an option mandatory,
 while `repeat` permits repetitions. Restart the daemon to apply policy changes.

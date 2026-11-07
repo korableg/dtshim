@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Start {
+    pub token: Option<String>,
     pub command: String,
     pub args: Vec<String>,
     pub env: Vec<(String, String)>,

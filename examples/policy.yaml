@@ -1,7 +1,9 @@
 commands:
   git:
     executable: /usr/bin/git
-    host_env: [HOME, SSH_AUTH_SOCK, {LANG: "C.UTF-8"}, {GIT_CONFIG_NOSYSTEM: "1"}]
+    env:
+      host: [HOME, SSH_AUTH_SOCK, {LANG: "C.UTF-8"}, {GIT_CONFIG_NOSYSTEM: "1"}]
+      allow: [HOME, SSH_AUTH_SOCK, LANG, GIT_CONFIG_NOSYSTEM, PATH]
     allow:
       - prefix: [status]
         options:

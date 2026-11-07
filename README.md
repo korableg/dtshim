@@ -44,6 +44,7 @@ ln -s /usr/local/bin/dtshim /usr/bin/git
 | Путь Unix-сокета                      | `--socket <PATH>`                | `DTSHIM_SOCKET_PATH`    |
 | Соответствия путей хоста и контейнера | `--volume_mapping <HOST:DOCKER>` | `DTSHIM_VOLUME_MAPPING` |
 | Политика разрешённых команд           | `--policy <FILE>`                | `DTSHIM_POLICY`         |
+| Токен подключения                     | `--token <TOKEN>`                | `DTSHIM_TOKEN`          |
 
 Volume mapping позволяет подменять пути в `cwd`, `args`, `env`, `stdin`, `stdout` и `stderr`.
 
@@ -57,8 +58,14 @@ Volume mapping позволяет подменять пути в `cwd`, `args`, 
 | Транспорт (`tcp` или `unix`) | —        | `DTSHIM_TRANSPORT`   |
 | TCP-адрес (`HOST:PORT`)      | —        | `DTSHIM_TCP_ADDR`    |
 | Путь Unix-сокета             | —        | `DTSHIM_SOCKET_PATH` |
+| Токен подключения            | —        | `DTSHIM_TOKEN`       |
 
 Клиенту необходимо передать адрес или путь до сокета через env.
+
+Токен необязателен: если он задан у демона, передайте тот же `DTSHIM_TOKEN` клиенту.
+Клиент и демон обновляйте вместе.
+
+Лимиты демона: 128 сессий, 10 секунд на первый полный запрос после принятия соединения.
 
 ```sh
 DTSHIM_TRANSPORT=unix DTSHIM_SOCKET_PATH=/run/dtshim/socket git --version
@@ -76,8 +83,11 @@ dtshimd --policy examples/policy.yaml
 Без политики команды не ограничены. С политикой вызов должен совпасть с одним
 из вариантов `allow`; `executable` задаёт абсолютный путь на хосте независимо от `PATH` клиента.
 
-В `host_env: [HOME, {LANG: "C.UTF-8"}]` имя сохраняет значение демона, а пара задаёт
+В `env.host: [HOME, {LANG: "C.UTF-8"}]` имя сохраняет значение демона, а пара задаёт
 фиксированное значение; клиент не может их переопределить.
+
+`env.allow`: `null`/отсутствие — все переменные клиента, `[]` — никакие, список — только указанные.
+Имена `env.host` должны входить в заданный список `env.allow`; окружение демона наследуется как прежде.
 
 `value` и `positionals` проверяются regexp целиком; `required` делает опцию обязательной,
 `repeat` разрешает повторы. Изменения политики применяются после перезапуска демона.

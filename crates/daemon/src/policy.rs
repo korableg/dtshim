@@ -4,7 +4,7 @@ use anyhow::{Context, Result, bail, ensure};
 use dtshim_core::model::Start;
 use regex::Regex;
 
-use crate::policy_config::{HostEnvConfig, InvocationConfig, PolicyConfig};
+use crate::policy_config::{AllowedArgsConfig, HostEnvConfig, PolicyConfig};
 
 struct AllowedOption {
     value: Option<Regex>,
@@ -12,18 +12,23 @@ struct AllowedOption {
     repeat: bool,
 }
 
-struct Invocation {
+struct AllowedArgs {
     prefix: Vec<String>,
     options: Vec<AllowedOption>,
     option_names: HashMap<String, usize>,
     positionals: Vec<Regex>,
 }
 
+struct CommandEnv {
+    host: Vec<String>,
+    overrides: Vec<(String, String)>,
+    allow: Option<Vec<String>>,
+}
+
 struct AllowedCommand {
     executable: String,
-    host_env: Vec<String>,
-    env_overrides: Vec<(String, String)>,
-    allow: Vec<Invocation>,
+    env: CommandEnv,
+    allow: Vec<AllowedArgs>,
 }
 
 #[derive(Default)]
@@ -57,8 +62,8 @@ fn full_regex(pattern: &str) -> Result<Regex> {
     Regex::new(&format!(r"\A(?:{pattern})\z")).context("invalid full-match regular expression")
 }
 
-impl Invocation {
-    fn compile(config: InvocationConfig) -> Result<Self> {
+impl AllowedArgs {
+    fn compile(config: AllowedArgsConfig) -> Result<Self> {
         let mut option_names = HashMap::new();
         let mut options = Vec::with_capacity(config.options.len());
         for (index, option) in config.options.into_iter().enumerate() {
@@ -180,9 +185,9 @@ impl Policy {
     fn compile(config: PolicyConfig) -> Result<Self> {
         let mut commands = HashMap::with_capacity(config.commands.len());
         for (name, command) in config.commands {
-            let mut host_env = Vec::with_capacity(command.host_env.len());
+            let mut host_env = Vec::with_capacity(command.env.host.len());
             let mut env_overrides = Vec::new();
-            for entry in command.host_env {
+            for entry in command.env.host {
                 match entry {
                     HostEnvConfig::Name(variable) => host_env.push(variable),
                     HostEnvConfig::Value(values) => {
@@ -198,7 +203,7 @@ impl Policy {
                 .into_iter()
                 .enumerate()
                 .map(|(index, config)| {
-                    Invocation::compile(config)
+                    AllowedArgs::compile(config)
                         .with_context(|| format!("command {name:?}, allow[{}]", index))
                 })
                 .collect::<Result<_>>()?;
@@ -206,8 +211,11 @@ impl Policy {
                 name,
                 AllowedCommand {
                     executable: command.executable,
-                    host_env,
-                    env_overrides,
+                    env: CommandEnv {
+                        host: host_env,
+                        overrides: env_overrides,
+                        allow: command.env.allow,
+                    },
                     allow,
                 },
             );
@@ -236,10 +244,15 @@ impl Policy {
             );
         }
         start.command.clone_from(&command.executable);
-        start
-            .env
-            .retain(|(name, _)| !command.host_env.contains(name));
-        start.env.extend(command.env_overrides.iter().cloned());
+        start.env.retain(|(name, _)| {
+            !command.env.host.contains(name)
+                && command
+                    .env
+                    .allow
+                    .as_ref()
+                    .is_none_or(|allow| allow.contains(name))
+        });
+        start.env.extend(command.env.overrides.iter().cloned());
         Ok(start)
     }
 }
@@ -256,6 +269,7 @@ mod tests {
 
     fn start(command: &str, args: &[&str]) -> Start {
         Start {
+            token: None,
             command: command.to_owned(),
             args: args.iter().map(|value| (*value).to_owned()).collect(),
             env: Vec::new(),
@@ -268,6 +282,50 @@ mod tests {
             "commands:\n  tool:\n    executable: /usr/bin/tool\n    allow:\n      - {invocation}\n"
         ))
         .unwrap()
+    }
+
+    #[test]
+    fn allow_filters_only_client_variables_and_preserves_host_overrides() {
+        let policy = compile_policy("commands: {tool: {executable: /bin/tool, env: {host: [HOME, {LANG: C}], allow: [HOME, LANG, PATH]}, allow: [{}]}}").unwrap();
+        let mut request = start("tool", &[]);
+        request.env = ["HOME", "LANG", "PATH", "OTHER"]
+            .into_iter()
+            .map(|name| (name.to_owned(), format!("client-{name}")))
+            .collect();
+        let prepared = policy.prepare(request).unwrap();
+        assert_eq!(
+            prepared.env,
+            [
+                ("PATH".to_owned(), "client-PATH".to_owned()),
+                ("LANG".to_owned(), "C".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn allow_supports_null_omitted_empty_and_selected_client_names() {
+        for (env, expected) in [
+            ("{}", vec!["HOME", "PATH", "OTHER", "HOME"]),
+            ("{allow: null}", vec!["HOME", "PATH", "OTHER", "HOME"]),
+            ("{allow: []}", vec![]),
+            ("{allow: [HOME, PATH]}", vec!["HOME", "PATH", "HOME"]),
+        ] {
+            let policy = compile_policy(&format!(
+                "commands: {{tool: {{executable: /bin/tool, env: {env}, allow: [{{}}]}}}}"
+            ))
+            .unwrap();
+            let mut request = start("tool", &[]);
+            request.env = ["HOME", "PATH", "OTHER", "HOME"]
+                .into_iter()
+                .map(|name| (name.to_owned(), format!("client-{name}")))
+                .collect();
+            let prepared = policy.prepare(request).unwrap();
+            let expected: Vec<_> = expected
+                .into_iter()
+                .map(|name| (name.to_owned(), format!("client-{name}")))
+                .collect();
+            assert_eq!(prepared.env, expected, "{env}");
+        }
     }
 
     #[test]
@@ -338,15 +396,15 @@ mod tests {
             "commands:
   first:
     executable: /bin/first
-    host_env: [HOME, MISSING]
+    env: {host: [HOME, MISSING]}
     allow: [{}]
   second:
     executable: /bin/second
-    host_env: [PATH]
+    env: {host: [PATH]}
     allow: [{}]
   empty:
     executable: /bin/empty
-    host_env: []
+    env: {host: []}
     allow: [{}]
   omitted:
     executable: /bin/omitted
@@ -386,7 +444,7 @@ mod tests {
     #[test]
     fn prepare_rewrites_command_and_env_without_changing_args_or_cwd() {
         let policy = compile_policy(
-            "commands: {tool: {executable: /bin/tool, host_env: [HOME, {FIXED: '/container/fixed'}, {EMPTY: ''}], allow: [{prefix: [status]}]}}",
+            "commands: {tool: {executable: /bin/tool, env: {host: [HOME, {FIXED: '/container/fixed'}, {EMPTY: ''}]}, allow: [{prefix: [status]}]}}",
         )
         .unwrap();
         let mut request = start("tool", &["status"]);
@@ -412,7 +470,7 @@ mod tests {
     #[test]
     fn host_env_filter_accepts_permissive_environment_names() {
         let policy = compile_policy(
-            "commands: {tool: {executable: /bin/tool, host_env: ['1', 'a-b', 'a.b', 'with space', 'имя'], allow: [{}]}}",
+            "commands: {tool: {executable: /bin/tool, env: {host: ['1', 'a-b', 'a.b', 'with space', 'имя']}, allow: [{}]}}",
         )
         .unwrap();
         let mut request = start("tool", &[]);
@@ -498,7 +556,10 @@ mod tests {
             vec!["-éa"],
             vec!["-aé"],
         ] {
-            assert!(policy.prepare(start("tool", &values)).is_err(), "{values:?}");
+            assert!(
+                policy.prepare(start("tool", &values)).is_err(),
+                "{values:?}"
+            );
         }
     }
 
@@ -529,7 +590,10 @@ mod tests {
             vec!["-jnимя", "--name=j"],
             vec!["--", "-jnимя"],
         ] {
-            assert!(policy.prepare(start("tool", &values)).is_err(), "{values:?}");
+            assert!(
+                policy.prepare(start("tool", &values)).is_err(),
+                "{values:?}"
+            );
         }
     }
 
@@ -605,20 +669,30 @@ mod tests {
             vec!["--value", "--", "--unknown"],
             vec!["--flag=", "--value="],
         ] {
-            assert!(policy.prepare(start("tool", &values)).is_err(), "{values:?}");
+            assert!(
+                policy.prepare(start("tool", &values)).is_err(),
+                "{values:?}"
+            );
         }
     }
 
     #[test]
     fn double_dash_is_positional_after_the_option_terminator() {
         let policy = policy("positionals: ['--', '-', '']");
-        assert!(policy.prepare(start("tool", &["--", "--", "-", ""])).is_ok());
+        assert!(
+            policy
+                .prepare(start("tool", &["--", "--", "-", ""]))
+                .is_ok()
+        );
         for values in [
             vec!["--", "-", ""],
             vec!["--", "--", "-"],
             vec!["--unknown", "--", "--", "-", ""],
         ] {
-            assert!(policy.prepare(start("tool", &values)).is_err(), "{values:?}");
+            assert!(
+                policy.prepare(start("tool", &values)).is_err(),
+                "{values:?}"
+            );
         }
     }
 

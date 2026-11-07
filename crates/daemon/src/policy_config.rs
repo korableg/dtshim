@@ -14,6 +14,17 @@ pub(crate) enum HostEnvConfig {
     Value(HashMap<String, String>),
 }
 
+#[derive(Default, Deserialize, garde::Validate)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct EnvConfig {
+    #[serde(default)]
+    #[garde(custom(validate_host_env))]
+    pub(crate) host: Vec<HostEnvConfig>,
+    #[serde(default)]
+    #[garde(custom(validate_env_allow))]
+    pub(crate) allow: Option<Vec<String>>,
+}
+
 #[derive(Deserialize, garde::Validate)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct OptionConfig {
@@ -34,7 +45,7 @@ pub(crate) struct OptionConfig {
 
 #[derive(Deserialize, garde::Validate)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct InvocationConfig {
+pub(crate) struct AllowedArgsConfig {
     #[serde(default)]
     #[garde(inner(pattern(r"\A[^\x00]*\z")))]
     pub(crate) prefix: Vec<String>,
@@ -52,10 +63,10 @@ pub(crate) struct CommandConfig {
     #[garde(custom(validate_executable))]
     pub(crate) executable: String,
     #[serde(default)]
-    #[garde(custom(validate_host_env))]
-    pub(crate) host_env: Vec<HostEnvConfig>,
+    #[garde(dive, custom(validate_env))]
+    pub(crate) env: EnvConfig,
     #[garde(length(min = 1), dive)]
-    pub(crate) allow: Vec<InvocationConfig>,
+    pub(crate) allow: Vec<AllowedArgsConfig>,
 }
 
 #[derive(Deserialize, garde::Validate)]
@@ -97,7 +108,7 @@ fn validate_host_env(entries: &[HostEnvConfig], _: &()) -> garde::Result {
                     (Some((variable, value)), None) => (variable, Some(value)),
                     _ => {
                         return Err(garde::Error::new(
-                            "each host_env mapping must contain exactly one variable",
+                            "each env.host mapping must contain exactly one variable",
                         ));
                     }
                 }
@@ -105,18 +116,57 @@ fn validate_host_env(entries: &[HostEnvConfig], _: &()) -> garde::Result {
         };
         if variable.is_empty() || variable.contains(['=', '\0']) {
             return Err(garde::Error::new(format!(
-                "invalid host_env name {variable:?}"
+                "invalid env.host name {variable:?}"
             )));
         }
         if value.is_some_and(|value| value.contains('\0')) {
             return Err(garde::Error::new(format!(
-                "host_env value for {variable:?} contains a NUL byte"
+                "env.host value for {variable:?} contains a NUL byte"
             )));
         }
         if !seen.insert(variable) {
             return Err(garde::Error::new(format!(
-                "duplicate host_env name {variable:?}"
+                "duplicate env.host name {variable:?}"
             )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_env_allow(allow: &Option<Vec<String>>, _: &()) -> garde::Result {
+    if let Some(names) = allow {
+        let mut seen = HashSet::new();
+        for name in names {
+            if name.is_empty() || name.contains(['=', '\0']) {
+                return Err(garde::Error::new(format!(
+                    "invalid env.allow name {name:?}"
+                )));
+            }
+            if !seen.insert(name) {
+                return Err(garde::Error::new(format!(
+                    "duplicate env.allow name {name:?}"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_env(env: &EnvConfig, _: &()) -> garde::Result {
+    let Some(allow) = &env.allow else {
+        return Ok(());
+    };
+    for entry in &env.host {
+        let names = match entry {
+            HostEnvConfig::Name(name) => vec![name],
+            HostEnvConfig::Value(values) => values.keys().collect(),
+        };
+        for name in names {
+            if !allow.contains(name) {
+                return Err(garde::Error::new(format!(
+                    "env.host name {name:?} is not included in env.allow"
+                )));
+            }
         }
     }
     Ok(())
@@ -161,6 +211,41 @@ mod tests {
     use super::*;
 
     #[test]
+    fn environment_allow_list_validates_names_and_all_host_entries() {
+        for env in [
+            "{host: [HOME], allow: []}",
+            "{host: [{HOME: fixed}], allow: [PATH]}",
+            "{allow: ['']}",
+            "{allow: ['A=B']}",
+            r#"{allow: ["A\0B"]}"#,
+            "{allow: [HOME, HOME]}",
+            "{allow: HOME}",
+            "{allow: [1]}",
+            "{typo: []}",
+        ] {
+            let yaml =
+                format!("commands: {{tool: {{executable: /bin/tool, env: {env}, allow: [{{}}]}}}}");
+            assert!(PolicyConfig::parse(&yaml).is_err(), "{env}");
+        }
+        for env in [
+            "{}",
+            "{allow: null}",
+            "{allow: []}",
+            "{host: [HOME, {LANG: C}], allow: [HOME, LANG]}",
+        ] {
+            let yaml =
+                format!("commands: {{tool: {{executable: /bin/tool, env: {env}, allow: [{{}}]}}}}");
+            assert!(PolicyConfig::parse(&yaml).is_ok(), "{env}");
+        }
+        assert!(
+            PolicyConfig::parse(
+                "commands: {tool: {executable: /bin/tool, host_env: [], allow: [{}]}}"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn malformed_host_env_entries_are_rejected() {
         for entries in [
             "[{HOME: one, HOME: two}]",
@@ -176,7 +261,7 @@ mod tests {
             "HOME",
         ] {
             let yaml = format!(
-                "commands: {{tool: {{executable: /bin/tool, host_env: {entries}, allow: [{{}}]}}}}"
+                "commands: {{tool: {{executable: /bin/tool, env: {{host: {entries}}}, allow: [{{}}]}}}}"
             );
             assert!(PolicyConfig::parse(&yaml).is_err(), "{entries}");
         }
@@ -197,7 +282,7 @@ mod tests {
             r#"[{A: "bad\0value"}]"#,
         ] {
             let yaml = format!(
-                "commands: {{tool: {{executable: /bin/tool, host_env: {entries}, allow: [{{}}]}}}}"
+                "commands: {{tool: {{executable: /bin/tool, env: {{host: {entries}}}, allow: [{{}}]}}}}"
             );
             assert!(PolicyConfig::parse(&yaml).is_err(), "{entries}");
         }
@@ -207,13 +292,13 @@ mod tests {
     fn host_env_names_reject_only_invalid_environment_names() {
         for names in [r#"['']"#, r#"['A=B']"#, r#"["A\0B"]"#] {
             let yaml = format!(
-                "commands: {{tool: {{executable: /bin/tool, host_env: {names}, allow: [{{}}]}}}}"
+                "commands: {{tool: {{executable: /bin/tool, env: {{host: {names}}}, allow: [{{}}]}}}}"
             );
             assert!(PolicyConfig::parse(&yaml).is_err(), "{names}");
         }
         assert!(
             PolicyConfig::parse(
-                "commands: {tool: {executable: /bin/tool, host_env: ['1', 'a-b', 'a.b', 'with space', 'имя'], allow: [{}]}}"
+                "commands: {tool: {executable: /bin/tool, env: {host: ['1', 'a-b', 'a.b', 'with space', 'имя']}, allow: [{}]}}"
             )
             .is_ok()
         );
