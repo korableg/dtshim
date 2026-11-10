@@ -28,7 +28,7 @@ struct CommandEnv {
 struct AllowedCommand {
     executable: String,
     env: CommandEnv,
-    allow: Vec<AllowedArgs>,
+    allow: Option<Vec<AllowedArgs>>,
 }
 
 #[derive(Default)]
@@ -169,6 +169,25 @@ impl AllowedArgs {
     }
 }
 
+fn compile_allowed_args(
+    name: &str,
+    rules: Option<Vec<AllowedArgsConfig>>,
+) -> Result<Option<Vec<AllowedArgs>>> {
+    match rules {
+        Some(rules) => {
+            let mut compiled = Vec::with_capacity(rules.len());
+            for (index, config) in rules.into_iter().enumerate() {
+                compiled.push(
+                    AllowedArgs::compile(config)
+                        .with_context(|| format!("command {name:?}, allow[{}]", index))?,
+                );
+            }
+            Ok(Some(compiled))
+        }
+        None => Ok(None),
+    }
+}
+
 impl Policy {
     pub(crate) fn new(path: Option<&Path>) -> Result<Self> {
         match path {
@@ -198,15 +217,7 @@ impl Policy {
                     }
                 }
             }
-            let allow = command
-                .allow
-                .into_iter()
-                .enumerate()
-                .map(|(index, config)| {
-                    AllowedArgs::compile(config)
-                        .with_context(|| format!("command {name:?}, allow[{}]", index))
-                })
-                .collect::<Result<_>>()?;
+            let allow = compile_allowed_args(&name, command.allow)?;
             commands.insert(
                 name,
                 AllowedCommand {
@@ -233,11 +244,12 @@ impl Policy {
         let command = commands
             .get(&start.command)
             .with_context(|| format!("command {:?} is not allowed", start.command))?;
-        if !command
-            .allow
-            .iter()
-            .any(|invocation| invocation.matches(&start.args))
-        {
+        let allowed = command.allow.as_ref().is_none_or(|rules| {
+            rules
+                .iter()
+                .any(|invocation| invocation.matches(&start.args))
+        });
+        if !allowed {
             bail!(
                 "arguments for command {:?} do not match any allowed invocation",
                 start.command
@@ -282,6 +294,85 @@ mod tests {
             "commands:\n  tool:\n    executable: /usr/bin/tool\n    allow:\n      - {invocation}\n"
         ))
         .unwrap()
+    }
+
+    #[test]
+    fn omitted_or_null_allow_preserves_arguments_and_pins_the_command() {
+        for allow in ["", ", allow: null"] {
+            let policy = compile_policy(&format!(
+                "commands: {{tool: {{executable: /bin/tool{allow}}}}}"
+            ))
+            .unwrap();
+            for args in [
+                &[][..],
+                &[
+                    "tools",
+                    "test-unit",
+                    "--future-flag=value",
+                    "-abc",
+                    "",
+                    "with spaces",
+                    "юникод",
+                    "--",
+                    "line\nbreak",
+                ],
+            ] {
+                let mut request = start("tool", args);
+                request.token = Some("secret".to_owned());
+                let prepared = policy.prepare(request).unwrap();
+                assert_eq!(prepared.command, "/bin/tool");
+                assert_eq!(prepared.args, args);
+                assert_eq!(prepared.cwd, "/work");
+                assert_eq!(prepared.token.as_deref(), Some("secret"));
+            }
+            for name in ["other", "/bin/tool", "./tool", "TOOL", ""] {
+                assert!(
+                    policy.prepare(start(name, &["--anything"])).is_err(),
+                    "{name}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn omitted_or_null_allow_keeps_environment_filters_and_other_rules() {
+        for allow in ["", "    allow: null\n"] {
+            let policy = compile_policy(&format!(
+                "commands:
+  tool:
+    executable: /bin/tool
+    env: {{host: [HOME, {{LANG: C}}], allow: [HOME, LANG, KEEP]}}
+{allow}  strict:
+    executable: /bin/strict
+    env: {{allow: []}}
+    allow: [{{}}]
+  none:
+    executable: /bin/none
+    env: {{allow: []}}
+{allow}",
+            ))
+            .unwrap();
+            let mut request = start("tool", &["--new-flag"]);
+            request.env = ["HOME", "LANG", "KEEP", "PATH", "DOCKER_HOST"]
+                .into_iter()
+                .map(|name| (name.to_owned(), format!("client-{name}")))
+                .collect();
+            let prepared = policy.prepare(request).unwrap();
+            assert_eq!(
+                prepared.env,
+                [
+                    ("KEEP".to_owned(), "client-KEEP".to_owned()),
+                    ("LANG".to_owned(), "C".to_owned()),
+                ]
+            );
+            let mut request = start("none", &["--new-flag"]);
+            request.env = vec![("HOME".to_owned(), "client-HOME".to_owned())];
+            assert!(policy.prepare(request).unwrap().env.is_empty());
+            assert!(policy.prepare(start("strict", &[])).is_ok());
+            for args in [&["--new-flag"][..], &["arg"], &[""]] {
+                assert!(policy.prepare(start("strict", args)).is_err());
+            }
+        }
     }
 
     #[test]

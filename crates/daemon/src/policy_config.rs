@@ -65,8 +65,9 @@ pub(crate) struct CommandConfig {
     #[serde(default)]
     #[garde(dive, custom(validate_env))]
     pub(crate) env: EnvConfig,
-    #[garde(length(min = 1), dive)]
-    pub(crate) allow: Vec<AllowedArgsConfig>,
+    #[serde(default)]
+    #[garde(dive, custom(validate_allow))]
+    pub(crate) allow: Option<Vec<AllowedArgsConfig>>,
 }
 
 #[derive(Deserialize, garde::Validate)]
@@ -74,6 +75,13 @@ pub(crate) struct CommandConfig {
 pub(crate) struct PolicyConfig {
     #[garde(dive, custom(validate_command_names))]
     pub(crate) commands: HashMap<String, CommandConfig>,
+}
+
+fn validate_allow(allow: &Option<Vec<AllowedArgsConfig>>, _: &()) -> garde::Result {
+    if allow.as_ref().is_some_and(Vec::is_empty) {
+        return Err(garde::Error::new("allow must contain at least one rule"));
+    }
+    Ok(())
 }
 
 fn validate_option_names(options: &[OptionConfig], _: &()) -> garde::Result {
@@ -209,6 +217,21 @@ impl PolicyConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn allow_accepts_omission_null_or_nonempty_rule_lists() {
+        for allow in ["null", "", "[{}]"] {
+            let yaml = format!("commands: {{tool: {{executable: /bin/tool, allow: {allow}}}}}");
+            assert!(PolicyConfig::parse(&yaml).is_ok(), "{allow}");
+        }
+        for allow in [
+            "any", "all", "Any", "true", "false", "{}", "[]", "[any]", "[null]", "42",
+        ] {
+            let yaml = format!("commands: {{tool: {{executable: /bin/tool, allow: {allow}}}}}");
+            assert!(PolicyConfig::parse(&yaml).is_err(), "{allow}");
+        }
+        assert!(PolicyConfig::parse("commands: {tool: {executable: /bin/tool}}").is_ok());
+    }
 
     #[test]
     fn environment_allow_list_validates_names_and_all_host_entries() {

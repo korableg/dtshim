@@ -83,8 +83,9 @@ DTSHIM_TRANSPORT=tcp DTSHIM_TCP_ADDR=host.docker.internal:20001 git --version
 dtshimd --policy examples/policy.yaml
 ```
 
-Without a policy, commands are unrestricted. With a policy, each invocation must match
-an `allow` variant; `executable` pins an absolute host path regardless of the client's `PATH`.
+Without a policy, commands are unrestricted. With a policy, `executable` pins an absolute
+host path regardless of the client's `PATH`. Omitted or `null` `allow` permits
+arbitrary arguments for that command; a configured list requires a match with one of its rules.
 
 In `env.host: [HOME, {LANG: "C.UTF-8"}]`, a name preserves the daemon's value and a pair
 sets a fixed value; the client cannot override either.
@@ -110,12 +111,12 @@ Download the archive for your platform from [Releases](https://github.com/korabl
 | Linux ARM64         | `dtshim-<version>-linux-arm64.tar.gz`      |
 | macOS Apple Silicon | `dtshim-<version>-macos-arm64.tar.gz`      |
 
-`<version>` is the selected release tag, for example `v0.6.0`.
+`<version>` is the selected release tag, for example `v0.7.0`.
 
 Each archive contains `dtshim` and `dtshimd`. To install the daemon on Linux x86_64:
 
 ```sh
-VERSION=v0.6.0
+VERSION=v0.7.0
 tar -xzf "dtshim-$VERSION-linux-x86_64.tar.gz" dtshimd
 mkdir -p "$HOME/.local/bin"
 install -m 755 dtshimd "$HOME/.local/bin/dtshimd"
