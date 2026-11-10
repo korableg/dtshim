@@ -80,8 +80,10 @@ DTSHIM_TRANSPORT=tcp DTSHIM_TCP_ADDR=host.docker.internal:20001 git --version
 dtshimd --policy examples/policy.yaml
 ```
 
-Без политики команды не ограничены. С политикой вызов должен совпасть с одним
-из вариантов `allow`; `executable` задаёт абсолютный путь на хосте независимо от `PATH` клиента.
+Без политики команды не ограничены. С политикой `executable` задаёт абсолютный путь
+хостовой программы независимо от `PATH` клиента. Отсутствующее поле `allow`
+или `null` разрешает любые аргументы команды; при заданном списке `allow` вызов должен
+совпасть с одним из его правил.
 
 В `env.host: [HOME, {LANG: "C.UTF-8"}]` имя сохраняет значение демона, а пара задаёт
 фиксированное значение; клиент не может их переопределить.
@@ -107,13 +109,13 @@ dtshimd --policy examples/policy.yaml
 | Linux ARM64         | `dtshim-<version>-linux-arm64.tar.gz`      |
 | macOS Apple Silicon | `dtshim-<version>-macos-arm64.tar.gz`      |
 
-`<version>` — тег выбранного релиза, например `v0.6.0`.
+`<version>` — тег выбранного релиза, например `v0.7.0`.
 
 Каждый архив содержит `dtshim` и `dtshimd`. Для Linux x86_64 установка демона
 выглядит так:
 
 ```sh
-VERSION=v0.6.0
+VERSION=v0.7.0
 tar -xzf "dtshim-$VERSION-linux-x86_64.tar.gz" dtshimd
 mkdir -p "$HOME/.local/bin"
 install -m 755 dtshimd "$HOME/.local/bin/dtshimd"

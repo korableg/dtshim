@@ -1,4 +1,9 @@
 commands:
+  jq:
+    executable: /usr/bin/jq
+    env:
+      allow: []
+    allow: null
   git:
     executable: /usr/bin/git
     env:
@@ -14,3 +19,9 @@ commands:
           - names: [--oneline]
           - names: [--max-count, -n]
             value: '[1-9][0-9]?'
+            required: true
+          - names: [--grep]
+            value: '[^\x00\r\n]+'
+            repeat: true
+        positionals:
+          - '[A-Za-z0-9][A-Za-z0-9._/-]*'
